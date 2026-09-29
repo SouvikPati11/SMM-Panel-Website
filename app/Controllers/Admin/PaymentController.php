@@ -13,6 +13,7 @@ use App\Core\Response;
 use App\Payment\GatewayRegistry;
 use App\Services\AuditService;
 use App\Services\ManualPaymentService;
+use App\Services\PaymentReviewService;
 use App\Services\PaymentService;
 use App\Services\UploadService;
 use App\Services\WalletService;
@@ -43,8 +44,51 @@ final class PaymentController extends Controller
         }
         $payments = Paginator::query('p.*, u.username, pm.name AS method', "FROM payments p JOIN users u ON u.id = p.user_id LEFT JOIN payment_methods pm ON pm.id = p.payment_method_id {$where}", $params, 'p.id DESC', $this->pageNum($request), 40);
         $sum = Database::instance()->fetch("SELECT COALESCE(SUM(amount),0) total, COUNT(*) n FROM payments WHERE status = 'completed' AND completed_at >= ?", [gmdate('Y-m-d H:i:s', time() - 30 * 86400)]);
-        $review = (int) Database::instance()->fetchColumn('SELECT COUNT(*) FROM payments WHERE needs_review = 1 AND status = ?', ['pending']);
+        $review = (int) Database::instance()->fetchColumn("SELECT COUNT(*) FROM payments WHERE needs_review = 1 AND status <> 'completed'");
         return $this->view('admin/payments/index', ['title' => 'Payments', 'payments' => $payments, 'status' => $status, 'gateway' => $gw, 'q' => $q, 'sum' => $sum, 'reviewCount' => $review, 'reviewOnly' => $request->str('review') === '1']);
+    }
+
+    public function show(Request $request, int $id): Response
+    {
+        $db = Database::instance();
+        $p = $db->fetch('SELECT p.*, u.username, u.email, pm.name AS method FROM payments p JOIN users u ON u.id = p.user_id LEFT JOIN payment_methods pm ON pm.id = p.payment_method_id WHERE p.id = ?', [$id]);
+        if (!$p) {
+            $this->notFound();
+        }
+        $meta = json_decode((string) $p['meta'], true) ?: [];
+        $adminIds = array_filter(array_column($meta['review_history'] ?? [], 'admin_id'));
+        $admins = $adminIds ? $db->fetchPairs('SELECT id, username FROM admins WHERE id IN (' . implode(',', array_fill(0, count($adminIds), '?')) . ')', array_values($adminIds)) : [];
+        return $this->view('admin/payments/show', [
+            'title' => 'Payment #' . $id,
+            'p' => $p,
+            'meta' => $meta,
+            'admins' => $admins,
+            'ledger' => $db->fetchAll("SELECT * FROM transactions WHERE reference IN (?, ?) ORDER BY id", ['payment:' . $id, 'payment:' . $id . ':bonus']),
+            'webhooks' => $db->fetchAll('SELECT id, ip, result, signature_valid, created_at FROM webhook_logs WHERE payment_id = ? ORDER BY id DESC LIMIT 20', [$id]),
+            'suggested' => PaymentReviewService::suggestedAmount($p),
+            'maxApprovable' => PaymentReviewService::maxApprovable($p),
+        ]);
+    }
+
+    public function reviewApprove(Request $request, int $id): Response
+    {
+        PaymentReviewService::approve($id, (int) $this->admin()['id'], $request->str('amount'), $request->str('note'));
+        $this->success('Payment approved and credited.');
+        return Response::redirect(admin_url('payments/' . $id));
+    }
+
+    public function reviewReject(Request $request, int $id): Response
+    {
+        PaymentReviewService::reject($id, (int) $this->admin()['id'], $request->str('reason'));
+        $this->success('Payment rejected. Nothing was credited and the user was notified.');
+        return Response::redirect(admin_url('payments/' . $id));
+    }
+
+    public function reviewRelease(Request $request, int $id): Response
+    {
+        $outcome = PaymentReviewService::release($id, (int) $this->admin()['id'], $request->str('note'));
+        $this->success('Released for re-verification. Gateway check: ' . $outcome . '.');
+        return Response::redirect(admin_url('payments/' . $id));
     }
 
     /** Re-query the gateway for a pending payment (never trusts anything but the gateway API). */

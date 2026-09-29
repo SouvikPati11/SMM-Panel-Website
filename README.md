@@ -184,6 +184,9 @@ query** (or the cron verifier), never from a browser redirect. P2Gateway
 callbacks are unsigned, so their content is ignored apart from the order
 reference; the payment state and amount always come from P2Gateway's status API,
 and the amount must match exactly or the payment is held for admin review.
+Held payments are handled on their own page (Admin → Payments → *Review*):
+**Approve & credit**, **Reject**, or **Re-check & release**. Each decision
+needs a note and is audited.
 
 ---
 
@@ -351,7 +354,7 @@ php tests/run.php            # all suites
 php tests/run.php Payment    # one suite
 ```
 
-The suite drops and recreates every table in the test database, then runs 110
+The suite drops and recreates every table in the test database, then runs 118
 integration tests through the real services and the full HTTP kernel, with a
 fake HTTP transport standing in for providers and gateways:
 
@@ -359,7 +362,7 @@ fake HTTP transport standing in for providers and gateways:
 |---|---|
 | Auth | registration + validation, disabled registration, login by username/email, wrong password, user/admin guard separation, HTTP login/logout, TOTP 2FA, password reset (hashed single-use token, expiry, session invalidation, no enumeration), session invalidation, email verification gate |
 | Orders | success pricing, server-side price, discounts, invalid/disabled/hidden service, min/max/format/URL validation, insufficient balance, idempotent double submit, provider rejection → refund, provider unreachable → retry, provider timeout → parked (no retry, no refund), invalid response, status sync, exact partial refund once, cancel refund once, refill forward + sync, local cancel & ownership, manual services, admin refund, custom comments, drip-feed, mass order, catalog import & price sync |
-| Payments | OxaPay invoice, limits, paid webhook credits once, duplicate callback, invalid/missing HMAC, forged "paid" rejected by server-side check, underpayment held, expired, cron recovery of missed webhook; Cryptomus signed paid (once), invalid signature, fail/cancel; P2Gateway (exact form fields, success/failure/duplicate order_id, timeout/5xx/non-JSON/missing-URL reconciliation, webhook → status-API verification for SUCCESS/COMPLETED/PENDING/FAILED/ERROR, forged webhook, unknown order, replay, amount mismatch → review, return page never credits, webhook+cron+return race, token never in HTML/logs); manual approve once / reject / duplicate reference / corrected amount; coupons (cap, per-user, expiry, global limit); referral commission, transfer, self/same-IP blocking |
+| Payments | OxaPay invoice, limits, paid webhook credits once, duplicate callback, invalid/missing HMAC, forged "paid" rejected by server-side check, underpayment held, expired, cron recovery of missed webhook; Cryptomus signed paid (once), invalid signature, fail/cancel; P2Gateway (exact form fields, success/failure/duplicate order_id, timeout/5xx/non-JSON/missing-URL reconciliation, webhook → status-API verification for SUCCESS/COMPLETED/PENDING/FAILED/ERROR, forged webhook, unknown order, replay, amount mismatch → review, admin review approve/reject/re-check (audited, capped, one credit under concurrent approvals, rejected payments never credited later), return page never credits, webhook+cron+return race, token never in HTML/logs); manual approve once / reject / duplicate reference / corrected amount; coupons (cap, per-user, expiry, global limit); referral commission, transfer, self/same-IP blocking |
 | Security | CSRF missing/wrong token, stateless exemptions, auth required, user≠admin, cross-user order/ticket access, role permissions (403), session invalidation, stored XSS in user & admin views, HTML sanitizer, SQL injection in searches, upload abuse (PHP-as-JPG, GIF/PHP polyglot re-encoded, oversize), path traversal, login brute force, security headers/CSP, encryption at rest, installer lock, robots.txt |
 | API | invalid key, hashed storage, balance, services, add + single/multi status, invalid service/quantity/funds, provider failure, cross-user isolation, per-key rate limit, invalid-key IP throttle, disabled/revoked keys, unknown action |
 | Money | exact decimals, ledger before/after, idempotent references, no negative balance, audited admin adjustments, **4 concurrent processes racing on one wallet** |
@@ -405,6 +408,7 @@ and database backed up · `TRUSTED_PROXIES` set if you use Cloudflare.
 | "Invalid or expired form token" | Session expired, or cookies blocked. Make sure `APP_URL` matches the domain exactly (www vs non-www, https). |
 | Styles missing | `APP_URL` wrong (assets are built from it), or document root misconfigured. |
 | Orders stay "pending" | Cron not running (dashboard banner), provider disabled, or order is manual-fulfilment. Check Admin → Providers → API logs. |
+| Payment flagged "review" | The gateway confirmed a different amount or reference. Open it from Admin → Payments, check the gateway dashboard, then approve, reject or re-check. |
 | Orders flagged "needs review" | Provider timed out after receiving the request. Check the provider panel and resolve in the order page. |
 | Payment paid but not credited | Admin → Logs → Payment webhooks (signature? amount mismatch?). Admin → Payments → *Verify* re-queries the gateway. Ensure the site is HTTPS and reachable. |
 | Emails not sent | Admin → Email → send test; check queue failures; on Hostinger use `smtp.hostinger.com`, port 465 SSL or 587 TLS, the full mailbox address as username. |

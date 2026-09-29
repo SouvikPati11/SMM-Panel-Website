@@ -167,8 +167,8 @@ final class PaymentService
             if ($p['status'] === 'completed') {
                 return false; // idempotent: already credited
             }
-            if ((int) $p['needs_review'] === 1 && !str_starts_with($source, 'admin')) {
-                return false; // held for review by a concurrent check: only an admin may credit it
+            if (!str_starts_with($source, 'admin') && ((int) $p['needs_review'] === 1 || PaymentReviewService::wasRejected($p))) {
+                return false; // held for review (or rejected) by an admin decision: only an admin may credit it
             }
             $res = WalletService::apply((int) $p['user_id'], (string) $p['amount'], 'deposit', 'payment:' . $p['id'], 'Deposit via ' . self::gatewayLabel($p['gateway']) . ' #' . $p['id'], ['payment_id' => (int) $p['id']]);
             $bonus = '0';
@@ -327,6 +327,9 @@ final class PaymentService
     {
         $db = Database::instance();
         $pid = (int) $payment['id'];
+        if (PaymentReviewService::wasRejected($payment)) {
+            return 'Rejected by admin — ignored';
+        }
         if ($verify->orderId !== null && $verify->orderId !== '' && !self::referenceMatches($payment, $verify->orderId)) {
             self::flagReview($payment, 'Verification returned a different order reference (' . $verify->orderId . ')');
             return 'Reference mismatch — held for review';

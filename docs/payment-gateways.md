@@ -31,6 +31,28 @@ Guarantees:
 - Amount/currency mismatches are held (not credited) and flagged in Admin → Payments with an email alert.
 - Credentials are encrypted in the database with `APP_KEY` (libsodium) and are write-only in the admin UI.
 
+### Payments held for review
+
+A payment is held (`needs_review = 1`) when the gateway confirms a different
+amount, currency or order reference. Nothing is credited, cron skips it, and the
+admin gets one email. Admin → Payments shows a banner and a **Review** button
+that opens the payment page (`/admin/payments/{id}`). That page shows the
+requested and confirmed amounts, the UTR, the references, callbacks, ledger
+entries and the decision history. There are three decisions, each needing the
+`payments.manage` permission and a note:
+
+| Action | Effect |
+|---|---|
+| **Approve & credit** | Credits the amount you enter through the normal crediting path (`PaymentService::complete`): one ledger entry `payment:{id}`, plus any promo bonus and referral commission based on that amount. The field is prefilled with the confirmed amount minus the fee. It is capped at the larger of the requested and the confirmed amount; for anything more, use a balance adjustment. |
+| **Reject** | No credit. A pending payment becomes `failed`, and the user is notified with your reason. Later callbacks, cron and the return page can never credit it. |
+| **Re-check & release** | Clears the hold and queries the gateway immediately. Credited only if the gateway now confirms the exact amount; otherwise it is held again. |
+
+Each decision locks the payment row and only works while it is still held,
+so two admins acting at once produce one outcome. Held payments that already
+expired or failed can also be approved or rejected. Every decision is added to
+the payment's review history and written to the audit log (`payment.review.*`)
+with the amounts, the original hold reason and your note.
+
 Webhook URLs (also sent automatically with every invoice):
 
 | Gateway | Callback URL |
@@ -139,7 +161,8 @@ supplied by the site owner. Only what is documented there is used:
   A response with `"status": false` is a rejected query, not a payment state.
 - **Amount**: must equal the expected amount exactly (to the paisa). A lower, higher
   or missing amount, or an `orderId` belonging to another order, holds the payment
-  for **admin review** (`needs_review`). Review payments are never auto-credited.
+  for **admin review** (`needs_review`). Review payments are never auto-credited;
+  see [Payments held for review](#payments-held-for-review).
 - **UTR** and the verified amount are stored on the payment and shown to the
   user and admin.
 - **Webhook**: because no payload format or signature is documented, callbacks

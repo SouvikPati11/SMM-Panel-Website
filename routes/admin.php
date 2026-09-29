@@ -74,6 +74,10 @@ $router->group(['prefix' => $prefix, 'middleware' => ['csrf']], static function 
         // Finance
         $router->get('/payments', [Admin\PaymentController::class, 'index'], 'admin.payments', ['perm:payments.view']);
         $router->post('/payments/{id}/verify', [Admin\PaymentController::class, 'verify'], 'admin.payments.verify', ['perm:payments.manage']);
+        $router->get('/payments/{id}', [Admin\PaymentController::class, 'show'], 'admin.payments.show', ['perm:payments.view']);
+        $router->post('/payments/{id}/review/approve', [Admin\PaymentController::class, 'reviewApprove'], 'admin.payments.review.approve', ['perm:payments.manage']);
+        $router->post('/payments/{id}/review/reject', [Admin\PaymentController::class, 'reviewReject'], 'admin.payments.review.reject', ['perm:payments.manage']);
+        $router->post('/payments/{id}/review/release', [Admin\PaymentController::class, 'reviewRelease'], 'admin.payments.review.release', ['perm:payments.manage']);
         $router->get('/manual-payments', [Admin\PaymentController::class, 'manual'], 'admin.manual', ['perm:payments.view']);
         $router->post('/manual-payments/{id}/approve', [Admin\PaymentController::class, 'approve'], 'admin.manual.approve', ['perm:payments.manage']);
         $router->post('/manual-payments/{id}/reject', [Admin\PaymentController::class, 'reject'], 'admin.manual.reject', ['perm:payments.manage']);

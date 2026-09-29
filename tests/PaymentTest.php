@@ -1,0 +1,285 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Core\Database;
+use App\Core\Exceptions\ValidationException;
+use App\Core\Request;
+use App\Services\CouponService;
+use App\Services\ManualPaymentService;
+use App\Services\PaymentService;
+use App\Services\ReferralService;
+
+const OXA_KEY = 'OXA-TEST-MERCHANT-KEY';
+const CM_KEY = 'cryptomus-payment-key-test';
+const CM_MERCHANT = '8b03432e-385b-4670-8d06-064591096795';
+
+$oxaMethod = Fx::gatewayMethod('oxapay', ['merchant_api_key' => OXA_KEY], ['lifetime' => '60']);
+$cmMethod = Fx::gatewayMethod('cryptomus', ['merchant_uuid' => CM_MERCHANT, 'payment_key' => CM_KEY]);
+
+/** Fake OxaPay API; $status controls what GET /payment/{id} reports. */
+$oxaFake = static function (string &$status, ?string $amount = null) {
+    Fx::http(['https://api.oxapay.com/v1/' => static function ($m, $url, $o) use (&$status, &$amount) {
+        if ($m === 'POST' && str_ends_with($url, '/payment/invoice')) {
+            T::eq(OXA_KEY, $o['headers']['merchant_api_key']);
+            return Fx::json(['data' => ['track_id' => 'TRK' . substr((string) $o['json']['order_id'], 4), 'payment_url' => 'https://pay.oxapay.com/x/' . $o['json']['order_id'], 'expired_at' => time() + 3600, 'date' => time()], 'message' => 'ok', 'status' => 200]);
+        }
+        if ($m === 'GET' && preg_match('#/payment/(TRK\d+)$#', $url, $mm)) {
+            return Fx::json(['data' => ['track_id' => $mm[1], 'status' => $status, 'amount' => $amount ?? '25', 'currency' => 'USD', 'order_id' => 'PAY-' . substr($mm[1], 3)], 'status' => 200]);
+        }
+        return Fx::json(['message' => 'not found'], 404);
+    }]);
+};
+
+$oxaWebhook = static function (array $payload, ?string $key = OXA_KEY): App\Core\Response {
+    $raw = json_encode($payload);
+    $server = ['REMOTE_ADDR' => '203.0.113.9', 'CONTENT_TYPE' => 'application/json'];
+    if ($key !== null) {
+        $server['HTTP_HMAC'] = hash_hmac('sha512', $raw, $key);
+    }
+    return PaymentService::handleWebhook('oxapay', Request::create('POST', '/webhooks/oxapay', [], $server, $raw));
+};
+
+T::test('OxaPay: invoice creation stores track_id and pay URL (never credits)', function () use ($oxaMethod, $oxaFake) {
+    $u = Fx::user();
+    $st = 'Waiting';
+    $oxaFake($st);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    T::eq('TRK' . $p['id'], $p['gateway_ref']);
+    T::true(str_starts_with($p['pay_url'], 'https://pay.oxapay.com/'));
+    T::eq('pending', $p['status']);
+    T::eq('0.000000', Fx::balance((int) $u['id']));
+});
+
+T::test('OxaPay: amount below minimum / above maximum rejected', function () use ($oxaMethod) {
+    $u = Fx::user();
+    T::throws(ValidationException::class, fn () => PaymentService::createGatewayPayment($u, $oxaMethod, '0.5', '', '1.2.3.4'), 'minimum');
+    T::throws(ValidationException::class, fn () => PaymentService::createGatewayPayment($u, $oxaMethod, '999999', '', '1.2.3.4'), 'maximum');
+    T::throws(ValidationException::class, fn () => PaymentService::createGatewayPayment($u, $oxaMethod, '-5', '', '1.2.3.4'));
+});
+
+T::test('OxaPay: valid "Paid" webhook credits once; duplicate callback ignored', function () use ($oxaMethod, $oxaFake, $oxaWebhook) {
+    $u = Fx::user();
+    $st = 'Paid';
+    $oxaFake($st);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    $payload = ['track_id' => $p['gateway_ref'], 'status' => 'Paid', 'type' => 'invoice', 'amount' => 25, 'currency' => 'USD', 'order_id' => 'PAY-' . $p['id']];
+    $r1 = $oxaWebhook($payload);
+    $r2 = $oxaWebhook($payload);
+    T::eq(200, $r1->status());
+    T::eq('ok', $r1->body());
+    T::eq(200, $r2->status());
+    T::eq('25.000000', Fx::balance((int) $u['id']));
+    T::eq('completed', Database::instance()->fetchColumn('SELECT status FROM payments WHERE id = ?', [$p['id']]));
+    T::eq(1, (int) Database::instance()->fetchColumn("SELECT COUNT(*) FROM transactions WHERE payment_id = ? AND type = 'deposit'", [$p['id']]));
+    T::eq('Duplicate: already completed', Database::instance()->fetchColumn('SELECT result FROM webhook_logs ORDER BY id DESC LIMIT 1'));
+});
+
+T::test('OxaPay: invalid HMAC rejected with 401 and nothing credited', function () use ($oxaMethod, $oxaFake, $oxaWebhook) {
+    $u = Fx::user();
+    $st = 'Paid';
+    $oxaFake($st);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    $payload = ['track_id' => $p['gateway_ref'], 'status' => 'Paid', 'type' => 'invoice', 'amount' => 25, 'currency' => 'USD', 'order_id' => 'PAY-' . $p['id']];
+    T::eq(401, $oxaWebhook($payload, 'wrong-key')->status());
+    T::eq(401, $oxaWebhook($payload, null)->status());
+    T::eq('0.000000', Fx::balance((int) $u['id']));
+    T::eq(0, (int) Database::instance()->fetchColumn('SELECT signature_valid FROM webhook_logs ORDER BY id DESC LIMIT 1'));
+});
+
+T::test('OxaPay: forged "Paid" webhook is not trusted if API says unpaid', function () use ($oxaMethod, $oxaFake, $oxaWebhook) {
+    $u = Fx::user();
+    $st = 'Waiting';
+    $oxaFake($st);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    $oxaWebhook(['track_id' => $p['gateway_ref'], 'status' => 'Paid', 'type' => 'invoice', 'amount' => 25, 'currency' => 'USD', 'order_id' => 'PAY-' . $p['id']]);
+    T::eq('0.000000', Fx::balance((int) $u['id']));
+});
+
+T::test('OxaPay: underpaid amount held for review, not credited', function () use ($oxaMethod, $oxaFake, $oxaWebhook) {
+    $u = Fx::user();
+    $st = 'Paid';
+    $amt = '10';
+    $oxaFake($st, $amt);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    $oxaWebhook(['track_id' => $p['gateway_ref'], 'status' => 'Paid', 'type' => 'invoice', 'amount' => 10, 'currency' => 'USD', 'order_id' => 'PAY-' . $p['id']]);
+    T::eq('0.000000', Fx::balance((int) $u['id']));
+    T::eq('pending', Database::instance()->fetchColumn('SELECT status FROM payments WHERE id = ?', [$p['id']]));
+});
+
+T::test('OxaPay: failed / expired webhook marks payment, never credits', function () use ($oxaMethod, $oxaFake, $oxaWebhook) {
+    $u = Fx::user();
+    $st = 'Expired';
+    $oxaFake($st);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    $oxaWebhook(['track_id' => $p['gateway_ref'], 'status' => 'Expired', 'type' => 'invoice', 'amount' => 25, 'currency' => 'USD', 'order_id' => 'PAY-' . $p['id']]);
+    T::eq('expired', Database::instance()->fetchColumn('SELECT status FROM payments WHERE id = ?', [$p['id']]));
+    // A late "Paid" for an expired invoice is still verified via API before crediting
+    $st = 'Paid';
+    $oxaWebhook(['track_id' => $p['gateway_ref'], 'status' => 'Paid', 'type' => 'invoice', 'amount' => 25, 'currency' => 'USD', 'order_id' => 'PAY-' . $p['id']]);
+    T::eq('25.000000', Fx::balance((int) $u['id']));
+});
+
+T::test('OxaPay: missed webhook recovered by cron verification', function () use ($oxaMethod, $oxaFake) {
+    $u = Fx::user();
+    $st = 'Paid';
+    $oxaFake($st);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    Database::instance()->update('payments', ['created_at' => gmdate('Y-m-d H:i:s', time() - 600)], ['id' => $p['id']]);
+    PaymentService::verifyPending();
+    T::eq('25.000000', Fx::balance((int) $u['id']));
+});
+
+// ------------------------------------------------------------------ Cryptomus
+
+$cmFake = static function (string &$status) {
+    Fx::http(['https://api.cryptomus.com/' => static function ($m, $url, $o) use (&$status) {
+        $body = $o['json'];
+        T::eq(md5(base64_encode($body) . CM_KEY), $o['headers']['sign'], 'request signature');
+        T::eq(CM_MERCHANT, $o['headers']['merchant']);
+        $d = json_decode($body, true);
+        if (str_ends_with($url, 'v1/payment')) {
+            return Fx::json(['state' => 0, 'result' => ['uuid' => 'uuid-' . $d['order_id'], 'url' => 'https://pay.cryptomus.com/pay/uuid-' . $d['order_id'], 'expired_at' => time() + 3600, 'status' => 'check']]);
+        }
+        if (str_ends_with($url, 'v1/payment/info')) {
+            return Fx::json(['state' => 0, 'result' => ['uuid' => $d['uuid'], 'order_id' => substr($d['uuid'], 5), 'amount' => '40.00', 'currency' => 'USD', 'payment_status' => $status, 'status' => $status]]);
+        }
+        return Fx::json(['state' => 1, 'message' => 'bad'], 422);
+    }]);
+};
+$cmWebhook = static function (array $data, string $key = CM_KEY): App\Core\Response {
+    $data['sign'] = md5(base64_encode(json_encode($data, JSON_UNESCAPED_UNICODE)) . $key);
+    return PaymentService::handleWebhook('cryptomus', Request::create('POST', '/webhooks/cryptomus', [], ['REMOTE_ADDR' => '91.227.144.54'], json_encode($data, JSON_UNESCAPED_UNICODE)));
+};
+
+T::test('Cryptomus: signed "paid" webhook credits once', function () use ($cmMethod, $cmFake, $cmWebhook) {
+    $u = Fx::user();
+    $st = 'paid';
+    $cmFake($st);
+    $p = PaymentService::createGatewayPayment($u, $cmMethod, '40', '', '1.2.3.4');
+    T::eq('uuid-PAY-' . $p['id'], $p['gateway_ref']);
+    $wh = ['type' => 'payment', 'uuid' => $p['gateway_ref'], 'order_id' => 'PAY-' . $p['id'], 'amount' => '40.00', 'payment_amount' => '40.00', 'currency' => 'USD', 'status' => 'paid', 'is_final' => true, 'url' => 'https://x/y'];
+    T::eq(200, $cmWebhook($wh)->status());
+    T::eq(200, $cmWebhook($wh)->status());
+    T::eq('40.000000', Fx::balance((int) $u['id']));
+});
+
+T::test('Cryptomus: invalid signature rejected', function () use ($cmMethod, $cmFake, $cmWebhook) {
+    $u = Fx::user();
+    $st = 'paid';
+    $cmFake($st);
+    $p = PaymentService::createGatewayPayment($u, $cmMethod, '40', '', '1.2.3.4');
+    $wh = ['type' => 'payment', 'uuid' => $p['gateway_ref'], 'order_id' => 'PAY-' . $p['id'], 'amount' => '40.00', 'currency' => 'USD', 'status' => 'paid', 'is_final' => true];
+    T::eq(401, $cmWebhook($wh, 'attacker-key')->status());
+    T::eq('0.000000', Fx::balance((int) $u['id']));
+});
+
+T::test('Cryptomus: failed / cancelled statuses never credit', function () use ($cmMethod, $cmFake, $cmWebhook) {
+    $u = Fx::user();
+    $st = 'fail';
+    $cmFake($st);
+    $p = PaymentService::createGatewayPayment($u, $cmMethod, '40', '', '1.2.3.4');
+    $cmWebhook(['type' => 'payment', 'uuid' => $p['gateway_ref'], 'order_id' => 'PAY-' . $p['id'], 'amount' => '40.00', 'currency' => 'USD', 'status' => 'fail', 'is_final' => true]);
+    T::eq('failed', Database::instance()->fetchColumn('SELECT status FROM payments WHERE id = ?', [$p['id']]));
+    $p2 = PaymentService::createGatewayPayment($u, $cmMethod, '40', '', '1.2.3.4');
+    $st = 'cancel';
+    $cmWebhook(['type' => 'payment', 'uuid' => $p2['gateway_ref'], 'order_id' => 'PAY-' . $p2['id'], 'amount' => '40.00', 'currency' => 'USD', 'status' => 'cancel', 'is_final' => true]);
+    T::eq('expired', Database::instance()->fetchColumn('SELECT status FROM payments WHERE id = ?', [$p2['id']]));
+    T::eq('0.000000', Fx::balance((int) $u['id']));
+});
+
+T::test('P2Gateway: placeholder is never offered and refuses webhooks', function () {
+    $db = Database::instance();
+    $db->query("UPDATE payment_methods SET status = 'active' WHERE gateway = 'p2gateway'");
+    $ids = array_column(PaymentService::availableMethods(), 'gateway');
+    T::true(!in_array('p2gateway', $ids, true), 'p2gateway must not be listed');
+    $r = PaymentService::handleWebhook('p2gateway', Request::create('POST', '/webhooks/p2gateway', [], [], '{"status":"success","amount":"999"}'));
+    T::eq(200, $r->status());
+    $db->query("UPDATE payment_methods SET status = 'disabled' WHERE gateway = 'p2gateway'");
+});
+
+// ------------------------------------------------------------------ Manual payments
+
+$manualId = (int) Database::instance()->fetchColumn("SELECT id FROM payment_methods WHERE gateway = 'manual'");
+Database::instance()->update('payment_methods', ['status' => 'active', 'require_proof' => 0], ['id' => $manualId]);
+
+T::test('Manual: approve credits once; second approval refused', function () use ($manualId) {
+    $u = Fx::user();
+    $rid = ManualPaymentService::submit($u, $manualId, '15', 'UTR123456789', null, 'paid from GPay');
+    T::eq('0.000000', Fx::balance((int) $u['id']));
+    ManualPaymentService::approve($rid, 1, null, 'ok');
+    T::eq('15.000000', Fx::balance((int) $u['id']));
+    T::throws(ValidationException::class, fn () => ManualPaymentService::approve($rid, 1, null, 'again'), 'already');
+    T::eq('15.000000', Fx::balance((int) $u['id']));
+    T::eq(1, (int) Database::instance()->fetchColumn("SELECT COUNT(*) FROM transactions WHERE user_id = ? AND type = 'deposit'", [$u['id']]));
+});
+
+T::test('Manual: reject never credits; duplicate reference refused', function () use ($manualId) {
+    $u = Fx::user();
+    $rid = ManualPaymentService::submit($u, $manualId, '15', 'UTR-REJ-001', null, '');
+    T::throws(ValidationException::class, fn () => ManualPaymentService::submit($u, $manualId, '15', 'UTR-REJ-001', null, ''), 'already been submitted');
+    T::throws(ValidationException::class, fn () => ManualPaymentService::reject($rid, 1, ''), 'reason');
+    ManualPaymentService::reject($rid, 1, 'Reference not found in bank statement');
+    T::throws(ValidationException::class, fn () => ManualPaymentService::approve($rid, 1, null, ''));
+    T::eq('0.000000', Fx::balance((int) $u['id']));
+});
+
+T::test('Manual: approve with corrected amount', function () use ($manualId) {
+    $u = Fx::user();
+    $rid = ManualPaymentService::submit($u, $manualId, '50', 'UTR-AMT-77', null, '');
+    ManualPaymentService::approve($rid, 1, '45.50', 'user sent less');
+    T::eq('45.500000', Fx::balance((int) $u['id']));
+});
+
+// ------------------------------------------------------------------ Coupons & referrals
+
+T::test('Coupon: percent bonus capped, per-user limit enforced', function () use ($manualId) {
+    $db = Database::instance();
+    $db->insert('coupons', ['code' => 'WELCOME10', 'type' => 'percent', 'value' => '10', 'min_deposit' => '20', 'max_discount' => '3', 'usage_limit' => 100, 'per_user_limit' => 1, 'status' => 'active', 'created_at' => now(), 'updated_at' => now()]);
+    $u = Fx::user();
+    T::throws(ValidationException::class, fn () => CouponService::validate('WELCOME10', (int) $u['id'], '10'), 'minimum');
+    T::eq('2.5000', CouponService::validate('welcome10', (int) $u['id'], '25')['bonus']);
+    $rid = ManualPaymentService::submit($u, $manualId, '50', 'UTR-CPN-1', null, '', 'WELCOME10');
+    ManualPaymentService::approve($rid, 1, null, '');
+    T::eq('53.000000', Fx::balance((int) $u['id'])); // 10% of 50 = 5, capped at 3
+    T::throws(ValidationException::class, fn () => CouponService::validate('WELCOME10', (int) $u['id'], '50'), 'already used');
+});
+
+T::test('Coupon: expired and global usage limit', function () {
+    $db = Database::instance();
+    $db->insert('coupons', ['code' => 'OLD', 'type' => 'fixed', 'value' => '5', 'expires_at' => gmdate('Y-m-d H:i:s', time() - 60), 'per_user_limit' => 1, 'status' => 'active', 'created_at' => now(), 'updated_at' => now()]);
+    $db->insert('coupons', ['code' => 'ONE', 'type' => 'fixed', 'value' => '5', 'usage_limit' => 1, 'used_count' => 1, 'per_user_limit' => 1, 'status' => 'active', 'created_at' => now(), 'updated_at' => now()]);
+    $u = Fx::user();
+    T::throws(ValidationException::class, fn () => CouponService::validate('OLD', (int) $u['id'], '50'), 'expired');
+    T::throws(ValidationException::class, fn () => CouponService::validate('ONE', (int) $u['id'], '50'), 'limit');
+});
+
+T::test('Referral: commission on deposit, not on bonus; transfer to balance', function () use ($manualId) {
+    App\Services\SettingsService::set('referral_percent', '10');
+    App\Services\SettingsService::set('referral_min_withdrawal', '1');
+    $ref = Fx::user('0', ['register_ip' => '10.0.0.1']);
+    $new = Fx::user();
+    ReferralService::attach((int) $new['id'], $ref['referral_code'], '10.0.0.2');
+    $rid = ManualPaymentService::submit($new, $manualId, '30', 'UTR-REF-1', null, '');
+    ManualPaymentService::approve($rid, 1, null, '');
+    $stats = ReferralService::stats((int) $ref['id']);
+    T::eq(1, $stats['referrals']);
+    T::eq('3.000000', $stats['available']);
+    T::eq('0.000000', Fx::balance((int) $ref['id']));
+    ReferralService::withdraw((int) $ref['id']);
+    T::eq('3.000000', Fx::balance((int) $ref['id']));
+    T::eq('0.000000', ReferralService::stats((int) $ref['id'])['available']);
+    T::throws(ValidationException::class, fn () => ReferralService::withdraw((int) $ref['id']));
+});
+
+T::test('Referral: self-referral / same-IP referral blocked', function () use ($manualId) {
+    $ref = Fx::user('0', ['register_ip' => '10.9.9.9']);
+    ReferralService::attach((int) $ref['id'], $ref['referral_code'], '1.1.1.1'); // self
+    T::eq(0, (int) Database::instance()->fetchColumn('SELECT COUNT(*) FROM referrals WHERE referred_id = ?', [$ref['id']]));
+    $alt = Fx::user();
+    ReferralService::attach((int) $alt['id'], $ref['referral_code'], '10.9.9.9'); // same IP
+    T::eq('blocked', Database::instance()->fetchColumn('SELECT status FROM referrals WHERE referred_id = ?', [$alt['id']]));
+    $rid = ManualPaymentService::submit($alt, $manualId, '30', 'UTR-REF-2', null, '');
+    ManualPaymentService::approve($rid, 1, null, '');
+    T::eq('0.000000', ReferralService::stats((int) $ref['id'])['available']);
+});

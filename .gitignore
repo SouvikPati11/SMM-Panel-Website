@@ -1,0 +1,15 @@
+/.env
+/vendor/
+/storage/logs/*
+/storage/sessions/*
+/storage/cache/*
+/storage/uploads/*
+/storage/installed.lock
+/public/uploads/*
+!/storage/**/.htaccess
+!/storage/**/.gitkeep
+!/public/uploads/.htaccess
+!/public/uploads/.gitkeep
+.DS_Store
+.idea/
+.vscode/

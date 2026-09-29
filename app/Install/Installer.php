@@ -27,7 +27,7 @@ use App\Services\SettingsService;
  */
 final class Installer
 {
-    public const REQUIRED_EXTENSIONS = ['pdo_mysql', 'mbstring', 'json', 'curl', 'openssl', 'fileinfo', 'sodium', 'ctype', 'dom'];
+    public const REQUIRED_EXTENSIONS = \App\Core\Requirements::EXTENSIONS;
     public const RECOMMENDED_EXTENSIONS = ['bcmath' => 'faster exact decimal math (a pure-PHP fallback is used otherwise)', 'gd' => 're-encoding uploaded images', 'intl' => 'better slugs for non-latin text', 'zip' => 'convenient updates'];
 
     public static function handle(Request $request): Response
@@ -55,7 +55,7 @@ final class Installer
     public static function checks(): array
     {
         $checks = [];
-        $checks[] = ['PHP version ≥ 8.1', PHP_VERSION_ID >= 80100, 'Current: ' . PHP_VERSION, true];
+        $checks[] = ['PHP version ≥ ' . \App\Core\Requirements::MIN_PHP, PHP_VERSION_ID >= \App\Core\Requirements::MIN_PHP_ID, 'Current: ' . PHP_VERSION, true];
         foreach (self::REQUIRED_EXTENSIONS as $ext) {
             $checks[] = ["Extension: {$ext}", extension_loaded($ext), '', true];
         }

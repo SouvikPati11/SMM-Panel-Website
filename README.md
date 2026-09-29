@@ -58,6 +58,19 @@ Design and research notes: [`docs/architecture.md`](docs/architecture.md).
 | Other | HTTPS certificate (required for payment webhooks), cron access |
 
 Composer is **optional**: the app has its own autoloader and no third-party runtime dependencies.
+The PHP version and extensions above are enforced by the application on every
+request and CLI run (`app/Core/Requirements.php`). If one is missing, the site
+shows a plain 500 message naming it, and the installer lists it as well. They
+are deliberately **not** declared as Composer platform requirements.
+
+**Hostinger Git deployment.** Hostinger runs `composer install` automatically
+after each Git pull, using its CLI PHP, which can have different extensions
+from the web PHP. The committed `composer.lock` has no packages, so that step
+installs nothing, needs no network and cannot fail on platform requirements.
+It only generates `vendor/autoload.php`, which the app uses if present.
+`vendor/` is never required, never committed, and is blocked from the web.
+Deploying without Composer (plain upload, FTP, or Git without the Composer
+step) works the same way.
 
 ---
 
@@ -354,7 +367,7 @@ php tests/run.php            # all suites
 php tests/run.php Payment    # one suite
 ```
 
-The suite drops and recreates every table in the test database, then runs 118
+The suite drops and recreates every table in the test database, then runs 122
 integration tests through the real services and the full HTTP kernel, with a
 fake HTTP transport standing in for providers and gateways:
 
@@ -403,6 +416,8 @@ and database backed up · `TRUSTED_PROXIES` set if you use Cloudflare.
 | Symptom | Fix |
 |---|---|
 | Blank page / 500 | See `storage/logs/app-YYYY-MM-DD.log`. Temporarily set `APP_DEBUG=true` (never leave it on). Check the PHP version is 8.1+. |
+| "requires these PHP extensions, which are not enabled" | Enable the named extensions for the **web** PHP version (Hostinger: Advanced → PHP Configuration → PHP extensions). |
+| Hostinger Git deploy fails at the Composer step | Make sure `composer.json` and `composer.lock` from this repository are deployed unchanged. They declare no platform requirements. The app does not need Composer at all. |
 | 404 on every page except home | `mod_rewrite`/`.htaccess` not active, or `.htaccess` files were not uploaded (hidden files). |
 | Redirect loop to https | Behind a proxy/CDN: set `TRUSTED_PROXIES`, or `FORCE_HTTPS=false` and let the host force HTTPS. |
 | "Invalid or expired form token" | Session expired, or cookies blocked. Make sure `APP_URL` matches the domain exactly (www vs non-www, https). |

@@ -7,7 +7,12 @@ declare(strict_types=1);
  * cron scripts and the test runner.
  */
 
+// Runtime requirements are enforced here, not by Composer (see App\Core\Requirements).
 if (PHP_VERSION_ID < 80100) {
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDERR, 'This application requires PHP 8.1 or newer. Current version: ' . PHP_VERSION . PHP_EOL);
+        exit(1);
+    }
     http_response_code(500);
     exit('This application requires PHP 8.1 or newer. Current version: ' . PHP_VERSION);
 }
@@ -18,8 +23,8 @@ define('STORAGE_PATH', BASE_PATH . '/storage');
 define('VIEW_PATH', BASE_PATH . '/resources/views');
 define('PUBLIC_PATH', BASE_PATH . '/public');
 
-// Composer is optional. When present, use it (it may carry optional packages);
-// otherwise fall back to a minimal PSR-4 autoloader for the App\ namespace.
+// Composer is optional. When present (e.g. a host ran `composer install` on
+// deploy), use it; otherwise fall back to a minimal PSR-4 autoloader for App\.
 if (is_file(BASE_PATH . '/vendor/autoload.php')) {
     require BASE_PATH . '/vendor/autoload.php';
 }
@@ -33,7 +38,19 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
-require APP_PATH . '/Helpers/functions.php';
+if ($missing = App\Core\Requirements::missingExtensions()) {
+    $msg = 'This application requires these PHP extensions, which are not enabled: ' . implode(', ', $missing) . '. Enable them in your hosting control panel (PHP configuration / extensions).';
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDERR, $msg . PHP_EOL);
+        exit(1);
+    }
+    http_response_code(500);
+    header('Content-Type: text/plain; charset=UTF-8');
+    exit($msg);
+}
+
+// require_once: safe even if a Composer autoloader from an older checkout also loads it.
+require_once APP_PATH . '/Helpers/functions.php';
 
 App\Core\Env::load(BASE_PATH . '/.env');
 App\Core\ErrorHandler::register();

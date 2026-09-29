@@ -43,13 +43,16 @@ $extra = json_decode((string) $order['extra'], true) ?: []; ?>
     </ul></div></div>
   </div>
   <div>
-    <?php if (can('orders.manage') && !$final): ?>
-    <div class="card mb-2"><div class="card-header"><h2>Set status</h2></div><div class="card-body">
-      <form method="post" action="<?= e($base . '/status') ?>" data-confirm="Apply this status? Partial/cancelled trigger automatic refunds."><?= csrf_field() ?>
-        <?= Form::select('status', 'Status', ['pending' => 'Pending', 'processing' => 'Processing', 'in_progress' => 'In progress', 'completed' => 'Completed', 'partial' => 'Partial (refund remains)', 'cancelled' => 'Cancelled (full refund)'], $order['status']) ?>
-        <div class="form-grid"><?= Form::input('start_count', 'Start count', $order['start_count'], ['type' => 'number', 'min' => 0]) ?><?= Form::input('remains', 'Remains', $order['remains'], ['type' => 'number', 'min' => 0]) ?></div>
-        <button class="btn btn-primary btn-block" type="submit">Update</button>
+    <?php $next = \App\Services\OrderService::adminAllowedStatuses($order); if (can('orders.manage') && !$final && $next): $refundable = Money::sub((string) $order['charge'], (string) $order['refunded_amount']);
+      $labels = ['processing' => 'Processing — no balance change', 'in_progress' => 'In progress — no balance change', 'completed' => 'Completed — no balance change', 'partial' => 'Partial — refunds the undelivered part (enter remains)', 'cancelled' => 'Cancelled — refunds ' . money($refundable, 4)]; ?>
+    <div class="card mb-2"><div class="card-header"><h2>Change status</h2><?= status_badge($order['status']) ?></div><div class="card-body">
+      <form method="post" action="<?= e($base . '/status') ?>" data-confirm="Apply this status change? The balance effect is shown next to each status."><?= csrf_field() ?>
+        <?= Form::select('status', 'New status', array_intersect_key($labels, array_flip($next)), $next[0]) ?>
+        <div class="form-grid"><?= Form::input('start_count', 'Start count', $order['start_count'], ['type' => 'number', 'min' => 0]) ?><?= Form::input('remains', 'Remains', $order['remains'], ['type' => 'number', 'min' => 0, 'max' => (int) $order['quantity'] * max(1, (int) $order['runs'])]) ?></div>
+        <?= Form::input('reason', 'Reason', '', ['required' => true, 'maxlength' => 400, 'attrs' => ['minlength' => 3], 'hint' => 'Recorded with your name in the order log and audit log.']) ?>
+        <button class="btn btn-primary btn-block" type="submit">Update status</button>
       </form>
+      <p class="hint mb-0">Only valid next statuses are listed. Final orders cannot be re-opened; a completed order can only be refunded below.</p>
     </div></div>
     <?php endif ?>
     <?php if (can('orders.manage') && !in_array($order['status'], ['refunded', 'failed'], true) && Money::isPositive(Money::sub((string) $order['charge'], (string) $order['refunded_amount']))): ?>

@@ -14,6 +14,10 @@ installer, add one cron line.
   gateways, coupons, affiliates, announcements & notifications, pages, FAQ,
   blog, SEO, settings, roles & permissions, logs & audit trail, system health,
   cron tasks.
+- **Auto-subscriptions** (orders repeated on a schedule by cron), **display
+  currencies**, **price levels by lifetime deposits**, configurable registration
+  (mobile number, email verification), audited balance add/remove and
+  lifecycle-checked order status changes. See [`docs/features.md`](docs/features.md).
 - Standard **SMM API v2** for resellers (compatible with common panel scripts).
 - Payment gateways: **OxaPay** and **Cryptomus** (implemented against the
   vendors' official SDKs), **P2Gateway.in UPI** (implemented against the
@@ -228,14 +232,17 @@ services (no provider) are also supported.
 
 ## Cron
 
-Full details: [`docs/cron.md`](docs/cron.md). One line, every minute:
+Full details: [`docs/cron.md`](docs/cron.md). Add **one** cron job, every minute, using the
+PHP **CLI** binary (not `lsphp`):
 
 ```
-* * * * * /usr/local/bin/php /home/USER/public_html/cron/run.php >/dev/null 2>&1
+/usr/bin/php /home/u123456789/domains/example.com/public_html/cron/run.php
 ```
 
-Hostinger: hPanel → Advanced → Cron Jobs → Custom → `/usr/bin/php /home/u123456789/domains/example.com/public_html/cron/run.php`, schedule every minute (or every 5).
-Admin → *Cron tasks* shows the exact command for your server and lets you run tasks manually.
+- **Hostinger:** hPanel → Advanced → Cron Jobs → Custom. Use the same PHP version as the site, e.g. `/opt/alt/php83/usr/bin/php`. Check each run with *View output*.
+- **cPanel:** Cron Jobs → "Once per minute" → `/usr/local/bin/php /home/USER/public_html/cron/run.php`.
+- Don't append `>/dev/null 2>&1`. Each run prints one line, errors go to stderr, exit codes are meaningful (0 ok, 1 task failed, 2 environment, 3 database), and every run is recorded.
+- **Verify:** Admin → *Cron tasks* shows the last run, the PHP binary cron used, the last success and the last error. It also shows the exact command for your server. Run `…/cron/run.php --check` to diagnose the cron PHP itself.
 
 ---
 
@@ -264,7 +271,11 @@ php database/migrate.php
 ```
 
 It is safe to run repeatedly and prints "Database schema is up to date." when there is
-nothing to do. Without SSH, use **Admin → System health → Apply database
+nothing to do. Migrations never delete data: they add tables and columns and only
+re-derive cached values from the ledger. `2026_10_05_subscriptions_currency_levels`, for
+example, adds subscriptions, display currencies, deposit thresholds and the mobile
+field. It keeps admin-assigned price levels and leaves existing levels without a
+threshold, so nobody is auto-promoted. Without SSH, use **Admin → System health → Apply database
 upgrades**, which runs the same migrations.
 
 ---
@@ -378,7 +389,7 @@ php tests/run.php            # all suites
 php tests/run.php Payment    # one suite
 ```
 
-The suite drops and recreates every table in the test database, then runs 125
+The suite drops and recreates every table in the test database, then runs 178
 integration tests through the real services and the full HTTP kernel, with a
 fake HTTP transport standing in for providers and gateways:
 
@@ -390,6 +401,11 @@ fake HTTP transport standing in for providers and gateways:
 | Security | CSRF missing/wrong token, stateless exemptions, auth required, user≠admin, cross-user order/ticket access, role permissions (403), session invalidation, stored XSS in user & admin views, HTML sanitizer, SQL injection in searches, upload abuse (PHP-as-JPG, GIF/PHP polyglot re-encoded, oversize), path traversal, login brute force, security headers/CSP, encryption at rest, installer lock, robots.txt |
 | API | invalid key, hashed storage, balance, services, add + single/multi status, invalid service/quantity/funds, provider failure, cross-user isolation, per-key rate limit, invalid-key IP throttle, disabled/revoked keys, unknown action |
 | Money | exact decimals, ledger before/after, idempotent references, no negative balance, audited admin adjustments, **4 concurrent processes racing on one wallet** |
+| Subscriptions | atomic creation with delivery 1, cron processing to completion, claim + per-cycle idempotency (4 concurrent processes → one order), back-off retries → suspend → resume, lifecycle/ownership, HTTP quote/confirm, admin audit |
+| Cron | lsphp/php-cgi command-line detection, CLI binary recommendation, task failure recording + log, lock-held skip, overlapping schedulers, interrupted runs, exit codes 0/1/2/3, missing-extension failure, diagnostics, URL trigger |
+| Accounts & admin | mobile field off/optional/required, email verification on/off with expiring single-use tokens, resend and grandfathering, balance add/remove ledger + audit + idempotency + permissions, order status transitions and idempotent refunds |
+| Currency & levels | exact display conversion, admin validation, per-user choice never converting stored values, base currency in admin/funds, deposit thresholds (credited only, no double count, pending/held/failed/rejected excluded), manual override, safe migration |
+| Order page & SEO | platform detection, server-side quote, JSON confirm, double submit, homepage headings/alt/meta/OG/Twitter/JSON-LD, canonical, robots/sitemap consistency, X-Robots-Tag on private pages |
 
 Also verified manually during development: every public, customer and admin
 page renders without PHP/JS errors, with no horizontal overflow at 360, 390,
@@ -462,7 +478,11 @@ and database backed up · `TRUSTED_PROXIES` set if you use Cloudflare.
 - 2FA setup shows a secret key and an `otpauth://` link, not a QR image (no
   external QR library/CDN is used).
 - Page/blog editing is a raw HTML textarea (sanitised), not a WYSIWYG editor.
-- Single currency per site; changing it later does not convert existing balances.
+- One base (accounting) currency per site; changing it later does not convert
+  existing balances. Other currencies are display-only, with admin-set rates.
+- Auto-subscriptions are panel-side (repeated normal orders). Provider-native
+  "Subscriptions" services (billed per new post) are not supported: the standard
+  API v2 documents no billing or status format for them.
 - Charts are simple server-rendered SVG (no JS charting library).
 - Deposits are refunded to the balance, never back to the original payment method (no payout integrations).
 - The demo catalog seeder (`tests/dev-seed.php`) is for local previews only.

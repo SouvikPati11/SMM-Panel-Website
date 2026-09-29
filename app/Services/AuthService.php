@@ -17,6 +17,8 @@ use App\Core\Validator;
 final class AuthService
 {
     public const PASSWORD_RULE = 'required|min:8|max:128';
+    /** Email verification links expire after 48 hours. */
+    public const VERIFY_TTL = 172800;
 
     // ---------------------------------------------------------------- register
 
@@ -34,6 +36,7 @@ final class AuthService
             throw new ValidationException('You must accept the Terms of Service.');
         }
         self::assertStrongPassword($data['password']);
+        $mobile = self::validateMobile((string) ($input['mobile'] ?? ''));
 
         $db = Database::instance();
         $email = strtolower($data['email']);
@@ -49,11 +52,12 @@ final class AuthService
             throw new ValidationException('Too many accounts were created from your network today. Please try again later.');
         }
 
-        $userId = $db->transaction(static function (Database $db) use ($data, $email, $ip): int {
+        $userId = $db->transaction(static function (Database $db) use ($data, $email, $ip, $mobile): int {
             $level = setting('default_price_level', '');
             $id = $db->insert('users', [
                 'username' => $data['username'],
                 'email' => $email,
+                'mobile' => $mobile,
                 'password_hash' => password_hash($data['password'], PASSWORD_DEFAULT),
                 'status' => 'active',
                 'price_level_id' => $level !== '' && ctype_digit((string) $level) ? (int) $level : null,
@@ -63,6 +67,7 @@ final class AuthService
                 'updated_at' => now(),
             ]);
             WalletService::createWallet($id);
+            PriceLevelService::sync($id); // automatic level (threshold 0 or the default level)
             return $id;
         });
         if ($refCode !== '') {
@@ -73,6 +78,60 @@ final class AuthService
             self::sendVerification($userId);
         }
         return $db->fetch('SELECT * FROM users WHERE id = ?', [$userId]);
+    }
+
+    /** Mobile field mode from Admin → Settings → Users: off | optional | required. */
+    public static function mobileMode(): string
+    {
+        if (setting('registration_mobile', '0') !== '1') {
+            return 'off';
+        }
+        return setting('registration_mobile_required', '0') === '1' ? 'required' : 'optional';
+    }
+
+    /**
+     * Validate a mobile number for the current mode. Returns the normalized
+     * number (E.164-style: optional "+", 7–15 digits) or null when not collected.
+     */
+    public static function validateMobile(string $raw, ?string $mode = null): ?string
+    {
+        $mode ??= self::mobileMode();
+        if ($mode === 'off') {
+            return null; // never stored while the field is disabled
+        }
+        $raw = trim($raw);
+        if ($raw === '') {
+            if ($mode === 'required') {
+                throw new ValidationException('Enter your mobile number.');
+            }
+            return null;
+        }
+        $n = preg_replace('/[\s().\-]/', '', $raw);
+        if (str_starts_with($n, '00')) {
+            $n = '+' . substr($n, 2);
+        }
+        if (!preg_match('/^\+?[1-9]\d{6,14}$/', $n)) {
+            throw new ValidationException('Enter a valid mobile number, including the country code (e.g. +44 7700 900123).');
+        }
+        return $n;
+    }
+
+    /**
+     * Whether this user must verify their email before using the panel.
+     * Accounts that existed before verification was switched on are not locked
+     * out (unless they later change their email address).
+     */
+    public static function needsVerification(array $user): bool
+    {
+        if (setting('email_verification', '0') !== '1' || !empty($user['email_verified_at'])) {
+            return false;
+        }
+        $since = (string) setting('email_verification_since', '');
+        if ($since === '') {
+            return true;
+        }
+        $relevant = max((string) ($user['created_at'] ?? ''), (string) ($user['email_changed_at'] ?? ''));
+        return $relevant >= $since;
     }
 
     public static function assertStrongPassword(string $password): void
@@ -273,7 +332,7 @@ final class AuthService
         }
         $token = Crypto::randomToken(32);
         $db->query('DELETE FROM email_verifications WHERE user_id = ?', [$userId]);
-        $db->insert('email_verifications', ['user_id' => $userId, 'token_hash' => hash('sha256', $token), 'expires_at' => gmdate('Y-m-d H:i:s', time() + 86400 * 2), 'created_at' => now()]);
+        $db->insert('email_verifications', ['user_id' => $userId, 'token_hash' => hash('sha256', $token), 'expires_at' => gmdate('Y-m-d H:i:s', time() + self::VERIFY_TTL), 'created_at' => now()]);
         MailService::sendNow($user['email'], 'Verify your email address', '<p>Welcome to ' . e(site_name()) . ', ' . e($user['username']) . '!</p><p>Please confirm your email address to activate your account.</p>' . MailService::button(url('/verify-email/' . $token), 'Verify email'));
     }
 

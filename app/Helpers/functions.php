@@ -88,24 +88,23 @@ function site_name(): string
     return (string) setting('site_name', Config::get('name', 'SMM Panel'));
 }
 
-/** Format an amount in the site currency, e.g. "$12.50". */
+/** Format a base-currency amount in the current display currency, e.g. "$12.50" or "€11.50". */
 function money(string|int|null $amount, ?int $decimals = null): string
 {
-    $decimals ??= (int) setting('currency_decimals', 2);
-    $symbol = (string) setting('currency_symbol', '$');
-    $formatted = Money::format((string) ($amount ?? '0'), $decimals);
-    $neg = str_starts_with($formatted, '-');
-    $formatted = ltrim($formatted, '-');
-    $out = setting('currency_position', 'before') === 'after' ? $formatted . ' ' . $symbol : $symbol . $formatted;
-    return ($neg ? '-' : '') . $out;
+    // Amounts are stored in the base currency; users may view them in their chosen currency.
+    return App\Services\CurrencyService::format($amount, null, $decimals);
 }
 
-/** Show a per-1000 rate in the site currency without trimming precision. */
+/** Always the base (accounting) currency — payment amounts, deposit limits, admin screens. */
+function money_base(string|int|null $amount, ?int $decimals = null): string
+{
+    return App\Services\CurrencyService::format($amount, App\Services\CurrencyService::base(), $decimals);
+}
+
+/** Show a per-1000 rate in the display currency without trimming precision. */
 function rate(string|int|null $amount): string
 {
-    $symbol = (string) setting('currency_symbol', '$');
-    $f = Money::formatRate((string) ($amount ?? '0'));
-    return setting('currency_position', 'before') === 'after' ? $f . ' ' . $symbol : $symbol . $f;
+    return App\Services\CurrencyService::formatRate($amount);
 }
 
 function display_tz(): DateTimeZone
@@ -174,7 +173,7 @@ function status_badge(string $status): string
     $map = [
         'pending' => 'warning', 'processing' => 'info', 'in_progress' => 'info', 'completed' => 'success',
         'partial' => 'orange', 'cancelled' => 'muted', 'refunded' => 'purple', 'failed' => 'danger',
-        'active' => 'success', 'suspended' => 'warning', 'banned' => 'danger', 'disabled' => 'muted', 'hidden' => 'muted',
+        'active' => 'success', 'paused' => 'warning', 'suspended' => 'warning', 'banned' => 'danger', 'disabled' => 'muted', 'hidden' => 'muted',
         'open' => 'info', 'answered' => 'success', 'closed' => 'muted',
         'approved' => 'success', 'rejected' => 'danger', 'expired' => 'muted',
         'published' => 'success', 'draft' => 'muted', 'ok' => 'success', 'error' => 'danger', 'unknown' => 'muted',

@@ -8,8 +8,8 @@
   <h3 class="mt-3">Next steps</h3>
   <ol>
     <li>Sign in to the admin panel: <a href="<?= e($adminUrl) ?>"><?= e($adminUrl) ?></a> (bookmark it — it is not linked publicly).</li>
-    <li>Add cron jobs in cPanel → Cron Jobs (see <code>docs/cron.md</code>):
-      <pre><code>* * * * * <?= e($phpBinary) ?> <?= e($basePath) ?>/cron/run.php >/dev/null 2>&amp;1</code></pre></li>
+    <li>Add one cron job that runs every minute (Hostinger: Advanced → Cron Jobs → Custom; cPanel: Cron Jobs). Use the PHP CLI binary, not <code>lsphp</code>. Details: <code>docs/cron.md</code> and Admin → Cron tasks.
+      <pre><code><?= e($phpBinary) ?> <?= e($basePath) ?>/cron/run.php</code></pre></li>
     <li>Configure SMTP (Admin → Email), payment gateways (Admin → Payment gateways) and your first provider (Admin → Providers).</li>
     <li>Enable SSL and keep <code>FORCE_HTTPS=true</code>.</li>
   </ol>

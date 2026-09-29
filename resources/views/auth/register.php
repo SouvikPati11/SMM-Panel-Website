@@ -5,6 +5,7 @@
   <?= csrf_field() ?>
   <?= Form::input('username', 'Username', '', ['required' => true, 'autocomplete' => 'username', 'maxlength' => 30, 'hint' => '3–30 characters: letters, numbers, underscore.']) ?>
   <?= Form::input('email', 'Email', '', ['type' => 'email', 'required' => true, 'autocomplete' => 'email', 'maxlength' => 190]) ?>
+  <?php if ($mobileMode !== 'off'): ?><?= Form::input('mobile', 'Mobile number' . ($mobileMode === 'optional' ? ' (optional)' : ''), '', ['type' => 'tel', 'required' => $mobileMode === 'required', 'autocomplete' => 'tel', 'inputmode' => 'tel', 'maxlength' => 20, 'placeholder' => '+1 555 010 0123', 'hint' => 'Include your country code.']) ?><?php endif ?>
   <div class="form-grid">
     <?= Form::input('password', 'Password', '', ['type' => 'password', 'required' => true, 'autocomplete' => 'new-password', 'maxlength' => 128]) ?>
     <?= Form::input('password_confirmation', 'Confirm password', '', ['type' => 'password', 'required' => true, 'autocomplete' => 'new-password', 'maxlength' => 128]) ?>

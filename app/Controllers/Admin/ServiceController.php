@@ -151,6 +151,7 @@ final class ServiceController extends Controller
             'max_quantity' => (int) $data['max_quantity'],
             'average_time' => $data['average_time'] ?: null,
             'dripfeed' => $request->bool('dripfeed') ? 1 : 0,
+            'subscription_enabled' => $request->bool('subscription_enabled') ? 1 : 0,
             'refill' => $request->bool('refill') ? 1 : 0,
             'refill_days' => (int) ($data['refill_days'] ?: 30),
             'cancel' => $request->bool('cancel') ? 1 : 0,

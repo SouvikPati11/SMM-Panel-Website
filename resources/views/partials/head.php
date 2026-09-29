@@ -15,14 +15,17 @@ $favicon = setting('site_favicon');
 <meta property="og:description" content="<?= e($meta['description']) ?>">
 <meta property="og:type" content="<?= e($meta['type']) ?>">
 <meta property="og:url" content="<?= e($meta['canonical']) ?>">
-<?php if ($meta['image']): ?><meta property="og:image" content="<?= e($meta['image']) ?>"><meta name="twitter:image" content="<?= e($meta['image']) ?>"><?php endif ?>
+<meta property="og:locale" content="en_US">
+<?php if ($meta['image']): ?><meta property="og:image" content="<?= e($meta['image']) ?>"><?php if ($meta['image'] === \App\Services\SeoService::defaultImage()): ?><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="<?= e(site_name()) ?> — social media growth panel"><?php endif ?><meta name="twitter:image" content="<?= e($meta['image']) ?>"><?php endif ?>
 <meta name="twitter:card" content="<?= $meta['image'] ? 'summary_large_image' : 'summary' ?>">
+<meta name="twitter:title" content="<?= e($meta['title']) ?>">
+<?php if ($meta['description'] !== ''): ?><meta name="twitter:description" content="<?= e($meta['description']) ?>"><?php endif ?>
 <meta name="csrf-token" content="<?= e(csrf_token()) ?>">
 <meta name="theme-color" content="#5b4dff">
 <?php if ($favicon): ?><link rel="icon" href="<?= e(upload_url($favicon)) ?>"><?php else: ?><link rel="icon" href="<?= e(asset('img/favicon.svg')) ?>" type="image/svg+xml"><?php endif ?>
 <script src="<?= e(asset('js/theme.js')) ?>"></script>
 <link rel="stylesheet" href="<?= e(asset('css/app.css')) ?>">
-<script type="application/json" id="currency-config"><?= json_encode(['symbol' => (string) setting('currency_symbol', '$'), 'position' => (string) setting('currency_position', 'before'), 'decimals' => (int) setting('currency_decimals', 2)], JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
+<script type="application/json" id="currency-config"><?= json_encode(\App\Services\CurrencyService::clientConfig(), JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
 <?php foreach ((array) $meta['jsonld'] as $ld): ?>
 <script type="application/ld+json"><?= json_encode($ld, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
 <?php endforeach ?>

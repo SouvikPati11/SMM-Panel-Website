@@ -25,9 +25,13 @@ $s = fn (string $k) => (string) setting($k); $on = fn (string $k) => setting($k)
   <div class="alert alert-warning"><?= icon('alert') ?><div>The currency applies to all balances and prices. Change it only before you have customer balances — existing amounts are not converted.</div></div>
   <div class="form-grid"><?= Form::input('currency_code', 'Currency code (ISO)', $s('currency_code'), ['required' => true, 'maxlength' => 3, 'hint' => 'Sent to gateways, e.g. USD, EUR, INR.']) ?><?= Form::input('currency_symbol', 'Symbol', $s('currency_symbol'), ['required' => true]) ?>
   <?= Form::select('currency_position', 'Symbol position', ['before' => 'Before ($10.00)', 'after' => 'After (10.00 ₹)'], $s('currency_position')) ?><?= Form::select('currency_decimals', 'Decimals shown', ['0' => '0', '2' => '2', '3' => '3', '4' => '4'], $s('currency_decimals')) ?></div>
+  <p class="hint">This is the <strong>base currency</strong>: every balance, price, ledger entry and payment is stored and charged in it.</p>
+  <?= Form::toggle('currency_switch_enabled', 'Let users choose a display currency', $on('currency_switch_enabled'), 'Display currencies and their rates are managed on the <a href="' . e(admin_url('currencies')) . '">Currencies</a> page. Prices are converted for display only; nothing stored is converted.') ?>
 <?php elseif ($tab === 'users'): ?>
   <?= Form::toggle('registration_enabled', 'Allow new registrations', $on('registration_enabled')) ?>
-  <?= Form::toggle('email_verification', 'Require email verification (configure SMTP first)', $on('email_verification')) ?>
+  <?= Form::toggle('email_verification', 'Require email verification (configure SMTP first)', $on('email_verification'), 'New accounts must confirm their email (links expire after 48 hours; users can resend). Accounts that existed before you switch this on are not blocked, unless they change their email.' . ($on('email_verification') && $s('email_verification_since') ? ' Enforced for accounts created since ' . e(fmt_date($s('email_verification_since'))) . '.' : '')) ?>
+  <?= Form::toggle('registration_mobile', 'Ask for a mobile number on registration', $on('registration_mobile')) ?>
+  <?= Form::toggle('registration_mobile_required', 'Mobile number is required', $on('registration_mobile_required'), 'Only applies when the field is shown. Numbers are validated (country code, 7–15 digits).') ?>
   <div class="form-grid"><?= Form::input('login_max_attempts', 'Failed logins before lockout', $s('login_max_attempts'), ['type' => 'number']) ?><?= Form::input('login_lockout_minutes', 'Lockout minutes', $s('login_lockout_minutes'), ['type' => 'number']) ?></div>
   <?= Form::select('default_price_level', 'Default price level for new users', $levels, $s('default_price_level'), ['empty' => 'None']) ?>
 <?php elseif ($tab === 'orders'): ?>
@@ -36,6 +40,8 @@ $s = fn (string $k) => (string) setting($k); $on = fn (string $k) => setting($k)
   <?= Form::input('mass_order_max_lines', 'Mass order max lines', $s('mass_order_max_lines'), ['type' => 'number']) ?>
   <?= Form::toggle('order_cancel_enabled', 'Users can request cancellation', $on('order_cancel_enabled')) ?>
   <?= Form::toggle('refill_enabled', 'Refills enabled', $on('refill_enabled')) ?>
+  <?= Form::toggle('subscriptions_enabled', 'Auto-subscriptions enabled', $on('subscriptions_enabled'), 'Enable per service with "Allow auto-subscriptions". When off, no new subscriptions are created and cron stops placing deliveries.') ?>
+  <?= Form::input('subscription_max_cycles', 'Maximum deliveries per subscription', $s('subscription_max_cycles'), ['type' => 'number', 'min' => 2, 'max' => 1000])  ?>
   <?= Form::input('order_sync_batch', 'Orders synced per cron run', $s('order_sync_batch'), ['type' => 'number', 'hint' => 'Lower this on slow shared hosting.']) ?>
 <?php elseif ($tab === 'funds'): ?>
   <div class="form-grid"><?= Form::input('min_deposit', 'Minimum deposit', $s('min_deposit'), ['type' => 'number', 'step' => '0.01']) ?><?= Form::input('max_deposit', 'Maximum deposit', $s('max_deposit'), ['type' => 'number', 'step' => '0.01']) ?></div>

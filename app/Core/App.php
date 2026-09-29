@@ -55,6 +55,7 @@ final class App
     public static function handle(Request $request): Response
     {
         self::$request = $request;
+        \App\Services\CurrencyService::reset(); // display currency is resolved per request
 
         // Before installation, everything goes to the installer.
         if (!self::isInstalled()) {
@@ -149,6 +150,11 @@ final class App
         }
         if (!$response->header('Cache-Control')) {
             $response->withHeader('Cache-Control', 'no-store, private');
+        }
+        // Account, admin, auth and installer pages must never be indexed — also for
+        // JSON, redirects and error responses, which carry no <meta name="robots">.
+        if (\App\Services\SeoService::isPrivatePath($request->path())) {
+            $response->withHeader('X-Robots-Tag', 'noindex, nofollow');
         }
         return $response;
     }

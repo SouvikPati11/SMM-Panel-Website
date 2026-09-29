@@ -63,6 +63,23 @@ final class Icons
         'mail' => '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
         'instagram' => '<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r=".8"/>',
         'send' => '<path d="M21 3 10 14M21 3l-7 18-4-7-7-4 18-7Z"/>',
+        // Social platforms: simple generic line glyphs drawn for this icon set (not brand artwork).
+        'facebook' => '<rect x="3" y="3" width="18" height="18" rx="5"/><path d="M15.5 8H14a2 2 0 0 0-2 2v11M9.5 13h5"/>',
+        'tiktok' => '<path d="M14 3v11.5a3.5 3.5 0 1 1-3.5-3.5"/><path d="M14 3c.4 2.6 2.2 4.4 5 4.6"/>',
+        'youtube' => '<rect x="2.5" y="5.5" width="19" height="13" rx="4"/><path d="m10.5 9.5 4 2.5-4 2.5v-5Z"/>',
+        'telegram' => '<path d="M21 4 3 11l6 2.2L18 7l-7 7.2.4 5.8 3.2-4 4.4 3.2L21 4Z"/>',
+        'x-brand' => '<path d="M4 4l16 16M20 4 4 20"/><rect x="2.5" y="2.5" width="19" height="19" rx="5"/>',
+        'spotify' => '<circle cx="12" cy="12" r="9"/><path d="M7.5 9.5c3-1 6.5-.7 9 .8M8 12.5c2.5-.7 5.2-.4 7.3.8M8.6 15.3c1.9-.5 3.9-.3 5.6.6"/>',
+        'twitch' => '<path d="M4 3h16v11l-4 4h-4l-3 3v-3H5V6l-1-3Z"/><path d="M11 8v4M15 8v4"/>',
+        'discord' => '<path d="M7 6.5c3.2-1.3 6.8-1.3 10 0 1.8 2.6 2.6 5.5 2.5 8.8-1.3 1.2-2.8 2-4.5 2.4l-1-1.7M7 6.5c-1.8 2.6-2.6 5.5-2.5 8.8 1.3 1.2 2.8 2 4.5 2.4l1-1.7"/><circle cx="9.5" cy="12.5" r="1"/><circle cx="14.5" cy="12.5" r="1"/>',
+        'linkedin' => '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7"/>',
+        'threads' => '<path d="M16.5 8.5C15.7 6 14 5 12 5c-3.5 0-6 2.8-6 7s2.5 7 6 7c2.8 0 5-1.7 5-4.3 0-2.4-2-3.7-4.6-3.7-1.8 0-3 1-3 2.2 0 1.4 1.3 2.1 2.6 2.1 2.2 0 3.4-1.6 3.4-4.6"/>',
+        'whatsapp' => '<path d="M20 12a8 8 0 0 1-11.9 7L4 20l1.1-4A8 8 0 1 1 20 12Z"/><path d="M9 9.5c.3 2.3 2.2 4.2 4.5 4.5l1-1.2 1.8.8-.4 1.6c-3.5.3-7.4-3.6-7.1-7.1L10.4 8l.8 1.8-1.2 1"/>',
+        'snapchat' => '<path d="M12 3c3 0 5 2.2 5 5v2.5l2 .5-1.6 1.6c.5 1.4 1.6 2.4 3.1 2.9-1 .8-2.3.9-3.3 1.1l-.5 1.4c-1.3-.2-2.7.1-3.7 1-1-.9-2.4-1.2-3.7-1l-.5-1.4c-1-.2-2.3-.3-3.3-1.1 1.5-.5 2.6-1.5 3.1-2.9L3 11l2-.5V8c0-2.8 2-5 5-5h2Z"/>',
+        'pinterest' => '<circle cx="12" cy="12" r="9"/><path d="M10.5 20.5 12 14m-.5-2.5c0-2 1-3 2.5-3s2.3 1 2.3 2.4c0 2.2-1.4 4.1-3.3 4.1-.9 0-1.5-.5-1.5-1.3"/>',
+        'soundcloud' => '<path d="M3 15v2M6 13v4M9 11v6M12 9v8h6a3 3 0 0 0 0-6 5 5 0 0 0-6-2"/>',
+        'reddit' => '<circle cx="12" cy="14" r="6.5"/><path d="M12 7.5 13.2 3l3.3.8"/><circle cx="18" cy="4.5" r="1.2"/><circle cx="9.5" cy="13.5" r=".8"/><circle cx="14.5" cy="13.5" r=".8"/><path d="M9.5 16.5c1.5 1 3.5 1 5 0"/>',
+        'kick' => '<path d="M5 4h4v5l3-3h3v3l-3 3 3 3v3h-3l-3-3v5H5V4Z"/>',
     ];
 
     public static function svg(string $name, string $class = ''): string

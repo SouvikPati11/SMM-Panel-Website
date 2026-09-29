@@ -37,7 +37,7 @@ final class ErrorHandler
             $err = error_get_last();
             if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
                 Logger::error('Fatal: ' . $err['message'], ['file' => $err['file'], 'line' => $err['line']]);
-                if (PHP_SAPI !== 'cli' && !headers_sent()) {
+                if (!Cli::isCommandLine() && !headers_sent()) {
                     http_response_code(500);
                     echo self::genericPage(500, 'Something went wrong', 'An unexpected error occurred. Please try again shortly.');
                 }
@@ -57,8 +57,8 @@ final class ErrorHandler
             ]);
         }
 
-        if (PHP_SAPI === 'cli') {
-            fwrite(STDERR, get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() . PHP_EOL);
+        if (Cli::isCommandLine()) {
+            Cli::stderr(get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
             exit(1);
         }
 

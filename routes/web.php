@@ -64,6 +64,10 @@ $router->group(['middleware' => ['maintenance', 'csrf', 'auth']], static functio
         $router->get('/order', [User\OrderController::class, 'create'], 'order.new');
         $router->post('/order', [User\OrderController::class, 'store'], 'order.store', ['throttle:order,30,60']);
         $router->get('/order/service/{id}', [User\OrderController::class, 'serviceInfo'], 'order.service');
+        $router->post('/order/quote', [User\OrderController::class, 'quote'], 'order.quote', ['throttle:quote,120,60']);
+        $router->get('/subscriptions', [User\SubscriptionController::class, 'index'], 'subscriptions');
+        $router->get('/subscriptions/{id}', [User\SubscriptionController::class, 'show'], 'subscriptions.show');
+        $router->post('/subscriptions/{id}/action', [User\SubscriptionController::class, 'action'], 'subscriptions.action', ['throttle:subaction,20,60']);
         $router->get('/mass-order', [User\OrderController::class, 'massForm'], 'order.mass');
         $router->post('/mass-order', [User\OrderController::class, 'massStore'], 'order.mass.store', ['throttle:mass,5,60']);
         $router->get('/catalog', [User\OrderController::class, 'catalog'], 'catalog');
@@ -97,6 +101,7 @@ $router->group(['middleware' => ['maintenance', 'csrf', 'auth']], static functio
 
         $router->get('/account', [User\AccountController::class, 'profile'], 'account');
         $router->post('/account', [User\AccountController::class, 'updateProfile'], 'account.update');
+        $router->post('/account/currency', [User\AccountController::class, 'currency'], 'account.currency', ['throttle:currency,20,60']);
         $router->get('/account/security', [User\AccountController::class, 'security'], 'account.security');
         $router->post('/account/password', [User\AccountController::class, 'password'], 'account.password', ['throttle:pwd,5,600']);
         $router->post('/account/2fa/enable', [User\AccountController::class, 'enable2fa'], 'account.2fa.enable', ['throttle:2fae,10,600']);

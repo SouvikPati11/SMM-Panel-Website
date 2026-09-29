@@ -12,6 +12,7 @@ $total = array_sum($counts); ?>
 </div>
 <form class="toolbar" method="get" action="<?= e(url('/orders')) ?>">
   <?php if ($status): ?><input type="hidden" name="status" value="<?= e($status) ?>"><?php endif ?>
+  <select class="select" name="type" data-autosubmit aria-label="Order type"><option value="">All orders</option><option value="single"<?= $type === 'single' ? ' selected' : '' ?>>One-time orders</option><option value="subscription"<?= $type === 'subscription' ? ' selected' : '' ?>>Subscription orders</option></select>
   <input class="input" type="search" name="q" value="<?= e($q) ?>" placeholder="Search by order ID or link">
   <button class="btn btn-secondary" type="submit"><?= icon('search') ?> Search</button>
 </form>
@@ -20,16 +21,14 @@ $total = array_sum($counts); ?>
     <div class="empty"><?= icon('list') ?><h3>No orders found</h3><p><?= $q || $status ? 'Try clearing the filters.' : 'Your orders will appear here.' ?></p></div>
   <?php else: ?>
   <div class="table-wrap"><table class="table table-cards">
-    <thead><tr><th>ID</th><th>Service</th><th>Link</th><th class="num">Qty</th><th class="num">Start</th><th class="num">Remains</th><th class="num">Charge</th><th>Status</th><th>Date</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>Service &amp; link</th><th class="num">Qty</th><th class="num">Start / remains</th><th class="num">Charge</th><th>Status</th><th>Date</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($orders->items as $o): ?>
       <tr>
         <td data-label="ID"><a class="mono" href="<?= e(url('/orders/' . $o['id'])) ?>">#<?= (int) $o['id'] ?></a></td>
-        <td class="cell-main"><span class="cell-title"><?= e(str_limit($o['service'], 70)) ?></span></td>
-        <td data-label="Link" class="link-cell"><?= link_html($o['link']) ?></td>
-        <td data-label="Quantity" class="num"><?= number_format((int) $o['quantity']) ?><?= $o['runs'] ? ' ×' . (int) $o['runs'] : '' ?></td>
-        <td data-label="Start count" class="num"><?= $o['start_count'] !== null ? number_format((int) $o['start_count']) : '—' ?></td>
-        <td data-label="Remains" class="num"><?= $o['remains'] !== null ? number_format((int) $o['remains']) : '—' ?></td>
+        <td class="cell-main"><span class="cell-title"><?= e(str_limit($o['service'], 70)) ?></span><?php if ($o['subscription_id']): ?><div class="cell-sub"><a class="badge badge-purple no-dot" href="<?= e(url('/subscriptions/' . $o['subscription_id'])) ?>"><?= icon('refresh') ?> Subscription #<?= (int) $o['subscription_id'] ?> · delivery <?= (int) $o['subscription_cycle'] ?></a></div><?php endif ?><div class="cell-sub link-line"><?= link_html($o['link']) ?></div></td>
+        <td data-label="Quantity" class="num nowrap"><?= number_format((int) $o['quantity']) ?><?= $o['runs'] ? ' ×' . (int) $o['runs'] : '' ?></td>
+        <td data-label="Start / remains" class="num nowrap"><?= $o['start_count'] !== null ? number_format((int) $o['start_count']) : '—' ?> / <?= $o['remains'] !== null ? number_format((int) $o['remains']) : '—' ?></td>
         <td data-label="Charge" class="num nowrap"><?= e(money($o['charge'])) ?></td>
         <td data-label="Status"><?= status_badge($o['status']) ?></td>
         <td data-label="Date" class="nowrap text-sm"><?= e(fmt_date($o['created_at'])) ?></td>

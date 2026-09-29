@@ -8,9 +8,12 @@ declare(strict_types=1);
  */
 
 // Runtime requirements are enforced here, not by Composer (see App\Core\Requirements).
+// Command line = no HTTP request (also true for lsphp/php-cgi started by cron, whose
+// PHP_SAPI is not "cli"). This block must stay parseable by old PHP versions.
+$smmCommandLine = PHP_SAPI === 'cli' || empty($_SERVER['REQUEST_METHOD']);
 if (PHP_VERSION_ID < 80100) {
-    if (PHP_SAPI === 'cli') {
-        fwrite(STDERR, 'This application requires PHP 8.1 or newer. Current version: ' . PHP_VERSION . PHP_EOL);
+    if ($smmCommandLine) {
+        fwrite(defined('STDERR') ? STDERR : fopen('php://stderr', 'wb'), 'This application requires PHP 8.1 or newer. Current version: ' . PHP_VERSION . ' (' . PHP_BINARY . ')' . PHP_EOL);
         exit(1);
     }
     http_response_code(500);
@@ -40,8 +43,8 @@ spl_autoload_register(static function (string $class): void {
 
 if ($missing = App\Core\Requirements::missingExtensions()) {
     $msg = 'This application requires these PHP extensions, which are not enabled: ' . implode(', ', $missing) . '. Enable them in your hosting control panel (PHP configuration / extensions).';
-    if (PHP_SAPI === 'cli') {
-        fwrite(STDERR, $msg . PHP_EOL);
+    if ($smmCommandLine) {
+        App\Core\Cli::stderr($msg . ' [' . PHP_BINARY . ', PHP ' . PHP_VERSION . ', ' . PHP_SAPI . ']');
         exit(1);
     }
     http_response_code(500);
@@ -54,6 +57,8 @@ require_once APP_PATH . '/Helpers/functions.php';
 
 App\Core\Env::load(BASE_PATH . '/.env');
 App\Core\ErrorHandler::register();
+
+unset($smmCommandLine);
 
 date_default_timezone_set('UTC');
 mb_internal_encoding('UTF-8');

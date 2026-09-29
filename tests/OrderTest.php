@@ -206,9 +206,9 @@ T::test('Order: manual service stays pending; admin partial applies refund', fun
     $o = OrderService::place((int) $u['id'], $manualServiceId, ['link' => 'https://x.com/a', 'quantity' => '2000']);
     T::eq('manual', $o['submit_state']);
     T::eq('5.000000', Fx::balance((int) $u['id']));
-    OrderService::adminSetStatus((int) $o['id'], 'partial', 0, 1000, 1);
+    OrderService::adminSetStatus((int) $o['id'], 'partial', 0, 1000, 1, 'Half delivered by hand');
     T::eq('7.500000', Fx::balance((int) $u['id']));
-    T::throws(ValidationException::class, fn () => OrderService::adminSetStatus((int) $o['id'], 'cancelled', null, null, 1), 'final');
+    T::throws(ValidationException::class, fn () => OrderService::adminSetStatus((int) $o['id'], 'cancelled', null, null, 1, 'Try to reopen'), 'final');
 });
 
 T::test('Order: admin refund refunds only the remainder', function () use ($serviceId, $fakeProvider) {

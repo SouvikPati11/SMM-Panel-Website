@@ -76,7 +76,7 @@ final class AuthController extends Controller
         if ($ref = $request->str('ref')) {
             Session::set('ref_code', mb_substr($ref, 0, 20));
         }
-        return $this->view('auth/register', ['title' => 'Create account', 'ref' => (string) Session::get('ref_code', '')]);
+        return $this->view('auth/register', ['title' => 'Create account', 'ref' => (string) Session::get('ref_code', ''), 'mobileMode' => AuthService::mobileMode()]);
     }
 
     public function register(Request $request): Response
@@ -86,7 +86,7 @@ final class AuthController extends Controller
         Session::forget('ref_code');
         AuthService::completeLogin('user', $user, $request->ip());
         $this->success('Welcome aboard! Your account is ready.');
-        return $this->redirect(setting('email_verification', '0') === '1' ? '/verify-email' : '/dashboard');
+        return $this->redirect(AuthService::needsVerification($user) ? '/verify-email' : '/dashboard');
     }
 
     public function referral(Request $request, string $token): Response
@@ -132,7 +132,7 @@ final class AuthController extends Controller
     public function verifyNotice(Request $request): Response
     {
         $user = $this->user();
-        if (!empty($user['email_verified_at']) || setting('email_verification', '0') !== '1') {
+        if (!AuthService::needsVerification($user)) {
             return $this->redirect('/dashboard');
         }
         return $this->view('auth/verify', ['title' => 'Verify your email', 'user' => $user]);
@@ -140,6 +140,9 @@ final class AuthController extends Controller
 
     public function resendVerification(Request $request): Response
     {
+        if (!AuthService::needsVerification($this->user())) {
+            return $this->redirect('/dashboard');
+        }
         AuthService::sendVerification((int) $this->user()['id']);
         $this->success('A new verification link has been sent.');
         return $this->redirect('/verify-email');

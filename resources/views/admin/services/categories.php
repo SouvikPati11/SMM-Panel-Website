@@ -3,7 +3,7 @@
 <div class="card"><div class="table-wrap"><table class="table table-cards">
   <thead><tr><th>Order</th><th>Name</th><th class="num">Services</th><th>Status</th><th></th></tr></thead><tbody>
   <?php foreach ($categories as $c): ?>
-    <tr><td data-label="Order" class="mono"><?= (int) $c['sort_order'] ?></td><td class="cell-main"><span class="cell-title"><?= e($c['name']) ?></span><div class="cell-sub">/<?= e($c['slug']) ?></div></td>
+    <tr><td data-label="Order" class="mono"><?= (int) $c['sort_order'] ?></td><td class="cell-main"><span class="cell-title heading-icon"><?= \App\Helpers\Platforms::icon(\App\Helpers\Platforms::detect($c['name'])) ?> <span><?= e($c['name']) ?></span></span><div class="cell-sub">/<?= e($c['slug']) ?></div></td>
       <td data-label="Services" class="num"><a href="<?= e(admin_url('services?category=' . $c['id'])) ?>"><?= (int) $c['active'] ?> / <?= (int) $c['services'] ?></a></td><td data-label="Status"><?= status_badge($c['status']) ?></td>
       <td class="actions"><button class="btn btn-ghost btn-sm" type="button" data-open-dialog="cat-dialog" data-fill="<?= json_attr(['id' => $c['id'], 'name' => $c['name'], 'slug' => $c['slug'], 'sort_order' => $c['sort_order'], 'status' => $c['status'], 'description' => $c['description']]) ?>"><?= icon('edit') ?></button>
         <form class="inline-form" method="post" action="<?= e(admin_url('categories/' . $c['id'] . '/delete')) ?>" data-confirm="Delete category?"><?= csrf_field() ?><button class="btn btn-ghost btn-sm" type="submit"><?= icon('trash') ?></button></form></td></tr>

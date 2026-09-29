@@ -1,5 +1,6 @@
 <?php $this->extend('layouts/user'); use App\Core\Money; ?>
-<div class="page-head"><div><h1>Add funds</h1><p>Your balance: <strong><?= e(money($user['balance'])) ?></strong></p></div></div>
+<div class="page-head"><div><h1>Add funds</h1><p>Your balance: <strong><?= e(money_base($user['balance'])) ?></strong><?php if (\App\Services\CurrencyService::isConverted()): ?> <span class="text-muted">(≈ <?= e(money($user['balance'])) ?>)</span><?php endif ?></p></div></div>
+<?php if (\App\Services\CurrencyService::isConverted()): ?><div class="alert alert-info"><?= icon('info') ?><div>Deposits are paid and credited in <strong><?= e(\App\Services\CurrencyService::base()['code']) ?></strong>, the currency your balance is kept in. Amounts in <?= e(\App\Services\CurrencyService::display()['code']) ?> elsewhere on the site are converted for display only.</div></div><?php endif ?>
 
 <div class="grid-main" id="funds-page">
   <div>
@@ -10,10 +11,10 @@
       <div class="card-header"><h2>1. Choose a payment method</h2></div>
       <div class="card-body" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
         <?php foreach ($methods as $i => $m): ?>
-        <label class="card method-card" data-method="<?= (int) $m['id'] ?>" style="padding:14px;cursor:pointer;margin:0">
-          <span class="flex items-center gap-1"><input type="radio" name="method_select" value="<?= (int) $m['id'] ?>" data-gateway="<?= e($m['gateway']) ?>" <?= $i === 0 ? 'checked' : '' ?> style="accent-color:var(--primary)">
-          <strong><?= e($m['name']) ?></strong></span>
-          <span class="text-xs text-muted" style="display:block;margin-top:4px"><?= e(money($m['min_amount'])) ?> – <?= e(money($m['max_amount'])) ?><?= Money::isPositive((string) $m['fee_percent']) ? ' · ' . e(rtrim(rtrim($m['fee_percent'], '0'), '.')) . '% fee' : '' ?></span>
+        <label class="card method-card" data-method="<?= (int) $m['id'] ?>">
+          <input type="radio" name="method_select" value="<?= (int) $m['id'] ?>" data-gateway="<?= e($m['gateway']) ?>" <?= $i === 0 ? 'checked' : '' ?>>
+          <span class="method-card-text"><strong><?= e($m['name']) ?></strong>
+          <span class="text-xs text-muted"><?= e(money_base($m['min_amount'])) ?> – <?= e(money_base($m['max_amount'])) ?><?= Money::isPositive((string) $m['fee_percent']) ? ' · ' . e(rtrim(rtrim($m['fee_percent'], '0'), '.')) . '% fee' : '' ?></span></span>
         </label>
         <?php endforeach ?>
       </div>
@@ -68,7 +69,7 @@
       <?php if (!$payments): ?><div class="empty" style="padding:24px"><p class="mb-0">No payments yet.</p></div><?php else: ?>
       <ul class="list-plain list-rows">
         <?php foreach ($payments as $p): ?>
-        <li><div style="min-width:0"><div class="cell-title"><?= e(money($p['amount'])) ?> <span class="text-muted text-xs">#<?= (int) $p['id'] ?></span></div><div class="cell-sub truncate"><?= e($p['method'] ?? \App\Services\PaymentService::gatewayLabel($p['gateway'])) ?> · <?= e(time_ago($p['created_at'])) ?></div></div>
+        <li><div style="min-width:0"><div class="cell-title"><?= e(money_base($p['amount'])) ?> <span class="text-muted text-xs">#<?= (int) $p['id'] ?></span></div><div class="cell-sub truncate"><?= e($p['method'] ?? \App\Services\PaymentService::gatewayLabel($p['gateway'])) ?> · <?= e(time_ago($p['created_at'])) ?></div></div>
           <div class="text-right"><?= status_badge($p['status']) ?><?php if ($p['status'] === 'pending' && $p['pay_url'] && $p['gateway'] !== 'manual'): ?><br><a class="text-xs" href="<?= e($p['pay_url']) ?>" rel="noopener">Pay now</a><?php endif ?></div></li>
         <?php endforeach ?>
       </ul>
@@ -79,7 +80,7 @@
       <div class="card-header"><h2>Manual requests</h2></div>
       <ul class="list-plain list-rows">
         <?php foreach ($manualRequests as $r): ?>
-        <li><div style="min-width:0"><div class="cell-title"><?= e(money($r['amount'])) ?> · <?= e($r['method']) ?></div><div class="cell-sub truncate">Ref <?= e($r['reference']) ?> · <?= e(time_ago($r['created_at'])) ?></div><?php if ($r['status'] === 'rejected' && $r['admin_note']): ?><div class="text-xs text-danger"><?= e($r['admin_note']) ?></div><?php endif ?></div><?= status_badge($r['status']) ?></li>
+        <li><div style="min-width:0"><div class="cell-title"><?= e(money_base($r['amount'])) ?> · <?= e($r['method']) ?></div><div class="cell-sub truncate">Ref <?= e($r['reference']) ?> · <?= e(time_ago($r['created_at'])) ?></div><?php if ($r['status'] === 'rejected' && $r['admin_note']): ?><div class="text-xs text-danger"><?= e($r['admin_note']) ?></div><?php endif ?></div><?= status_badge($r['status']) ?></li>
         <?php endforeach ?>
       </ul>
     </div>

@@ -217,7 +217,7 @@ final class Installer
             'adminUrl' => $appUrl . '/' . $adminPath,
             'appUrl' => $appUrl,
             'basePath' => BASE_PATH,
-            'phpBinary' => PHP_BINARY ?: '/usr/local/bin/php',
+            'phpBinary' => \App\Core\Cli::recommendedCliBinary(), // not PHP_BINARY: the web process runs lsphp/php-fpm
         ]);
     }
 }

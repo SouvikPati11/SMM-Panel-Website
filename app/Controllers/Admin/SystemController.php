@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers\Admin;
 
 use App\Controllers\Controller;
+use App\Core\Cli;
 use App\Core\Config;
 use App\Core\Database;
 use App\Core\Exceptions\ValidationException;
@@ -16,6 +17,7 @@ use App\Install\Installer;
 use App\Install\Migrator;
 use App\Services\AuditService;
 use App\Services\CronService;
+use App\Services\CronStatus;
 
 final class SystemController extends Controller
 {
@@ -105,12 +107,21 @@ final class SystemController extends Controller
 
     public function cron(Request $request): Response
     {
+        $tasks = CronService::status();
+        $status = CronStatus::read();
         return $this->view('admin/system/cron', [
             'title' => 'Cron tasks',
-            'tasks' => CronService::status(),
+            'tasks' => $tasks,
             'runs' => Database::instance()->fetchAll('SELECT * FROM cron_runs ORDER BY id DESC LIMIT 40'),
-            'php' => PHP_BINARY ?: '/usr/local/bin/php',
+            // The web process runs lsphp/php-fpm: PHP_BINARY here is NOT what cron should call.
+            'php' => Cli::recommendedCliBinary(),
+            'phpCandidates' => Cli::cliBinaryCandidates(),
             'base' => BASE_PATH,
+            'cronStatus' => $status,
+            'cronCheck' => CronStatus::readCheck(),
+            'problems' => CronStatus::problems($status, $tasks),
+            'checks' => CronService::diagnose(),
+            'httpKey' => strlen((string) Config::get('cron_key', '')) >= 32,
         ]);
     }
 

@@ -9,6 +9,33 @@ use App\Core\Database;
 /** Meta tags, canonical URLs, Open Graph, JSON-LD and sitemap generation. */
 final class SeoService
 {
+    /** Account, auth and technical paths: never indexed (robots.txt + X-Robots-Tag). */
+    public const PRIVATE_PREFIXES = [
+        '/dashboard', '/order', '/orders', '/mass-order', '/subscriptions', '/refills', '/catalog', '/funds', '/transactions',
+        '/tickets', '/affiliates', '/account', '/notifications', '/verify-email', '/login', '/register', '/forgot-password',
+        '/reset-password', '/2fa', '/logout', '/api/', '/webhooks/', '/tasks/', '/install', '/ref/',
+    ];
+
+    public static function isPrivatePath(string $path): bool
+    {
+        $admin = '/' . admin_path();
+        if ($path === $admin || str_starts_with($path, $admin . '/')) {
+            return true;
+        }
+        foreach (self::PRIVATE_PREFIXES as $p) {
+            $bare = rtrim($p, '/');
+            if ($path === $bare || str_starts_with($path, $bare . '/')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Default share image (1200×630) used when no custom Open Graph image is uploaded. */
+    public static function defaultImage(): string
+    {
+        return url('/assets/img/og-default.jpg');
+    }
     public static function meta(array $page = []): array
     {
         $site = site_name();
@@ -17,7 +44,7 @@ final class SeoService
             'title' => $title ? $title . ' — ' . $site : (string) setting('seo_title', $site),
             'description' => mb_substr(trim(strip_tags((string) ($page['description'] ?? setting('seo_description', '')))), 0, 300),
             'canonical' => $page['canonical'] ?? url(\App\Core\App::request()?->path() ?? '/'),
-            'image' => $page['image'] ?? (setting('seo_og_image') ? upload_url((string) setting('seo_og_image')) : ''),
+            'image' => $page['image'] ?? (setting('seo_og_image') ? upload_url((string) setting('seo_og_image')) : self::defaultImage()),
             'type' => $page['type'] ?? 'website',
             'robots' => $page['robots'] ?? 'index,follow',
             'jsonld' => $page['jsonld'] ?? [],
@@ -66,7 +93,7 @@ final class SeoService
         $db = Database::instance();
         $urls = [
             ['/', '1.0', null], ['/services', '0.9', null], ['/faq', '0.6', null], ['/api-docs', '0.6', null],
-            ['/contact', '0.4', null], ['/login', '0.3', null], ['/register', '0.5', null],
+            ['/contact', '0.4', null], // login/register are noindex, so they are not listed
         ];
         foreach ($db->fetchAll("SELECT slug, updated_at FROM pages WHERE status = 'published'") as $p) {
             $urls[] = ['/page/' . $p['slug'], '0.4', $p['updated_at']];
@@ -88,8 +115,12 @@ final class SeoService
 
     public static function robots(): string
     {
-        // The admin path is deliberately NOT listed: robots.txt is public and would reveal it.
-        $txt = "User-agent: *\nDisallow: /dashboard\nDisallow: /orders\nDisallow: /funds\nDisallow: /tickets\nDisallow: /account\nDisallow: /api/\nDisallow: /webhooks/\nDisallow: /install\n";
+        // The admin path is deliberately NOT listed: robots.txt is public and would reveal it
+        // (admin pages send X-Robots-Tag: noindex instead).
+        $txt = "User-agent: *\n";
+        foreach (self::PRIVATE_PREFIXES as $p) {
+            $txt .= 'Disallow: ' . $p . "\n";
+        }
         $extra = trim((string) setting('seo_robots_extra', ''));
         if ($extra !== '') {
             $txt .= $extra . "\n";

@@ -23,7 +23,22 @@ final class AccountController extends Controller
 {
     public function profile(Request $request): Response
     {
-        return $this->view('user/profile', ['title' => 'Profile', 'user' => $this->user(), 'timezones' => \DateTimeZone::listIdentifiers()]);
+        $user = $this->user();
+        return $this->view('user/profile', [
+            'title' => 'Profile',
+            'user' => $user,
+            'timezones' => \DateTimeZone::listIdentifiers(),
+            'mobileMode' => AuthService::mobileMode(),
+            'currencies' => \App\Services\CurrencyService::switchEnabled() ? \App\Services\CurrencyService::all() : [],
+            'level' => \App\Services\PriceLevelService::progress($user),
+        ]);
+    }
+
+    /** Quick display-currency switch (topbar). Display only — balances are never converted. */
+    public function currency(Request $request): Response
+    {
+        \App\Services\CurrencyService::setUserCurrency((int) $this->user()['id'], $request->str('currency'));
+        return $this->back($request, '/dashboard');
     }
 
     public function updateProfile(Request $request): Response
@@ -35,6 +50,14 @@ final class AccountController extends Controller
             throw new ValidationException('Select a valid timezone.');
         }
         $update = ['name' => $name ?: null, 'timezone' => $tz ?: null, 'updated_at' => now()];
+        $mode = AuthService::mobileMode();
+        if ($mode !== 'off') {
+            $update['mobile'] = AuthService::validateMobile($request->str('mobile'), $mode);
+        }
+        $currency = $request->str('currency');
+        if ($currency !== '' && strtoupper($currency) !== strtoupper((string) ($user['currency'] ?: \App\Services\CurrencyService::base()['code']))) {
+            \App\Services\CurrencyService::setUserCurrency((int) $user['id'], $currency); // display only: nothing stored is converted
+        }
 
         $email = strtolower($request->str('email'));
         if ($email !== $user['email']) {
@@ -49,6 +72,7 @@ final class AccountController extends Controller
             }
             $update['email'] = $email;
             $update['email_verified_at'] = null;
+            $update['email_changed_at'] = now(); // must be re-verified even if the account predates verification
             AuditService::log('user.email_changed', 'user', (int) $user['id'], ['from' => $user['email'], 'to' => $email]);
         }
         Database::instance()->update('users', $update, ['id' => $user['id']]);

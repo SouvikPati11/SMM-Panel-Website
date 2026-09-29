@@ -9,6 +9,7 @@ $nav = [
     ['/order', 'New Order', 'plus'],
     ['/mass-order', 'Mass Order', 'layers', setting('mass_order_enabled', '1') === '1'],
     ['/orders', 'My Orders', 'list'],
+    ['/subscriptions', 'Subscriptions', 'clock', \App\Services\SubscriptionService::enabled()],
     ['/refills', 'Refills', 'refresh', setting('refill_enabled', '1') === '1'],
     ['/catalog', 'Services', 'search'],
     ['Wallet', null],
@@ -49,7 +50,7 @@ $nav = [
       <button class="icon-btn menu-toggle" type="button" data-nav-toggle aria-controls="sidebar" aria-expanded="false" aria-label="Open menu"><?= icon('menu') ?></button>
       <div class="topbar-title"><?= e($title ?? 'Dashboard') ?></div>
       <div class="spacer"></div>
-      <a class="balance-chip" href="<?= e(url('/funds')) ?>" title="Add funds"><?= icon('wallet') ?> <span class="label hide-xs">Balance</span> <span><?= e(money($user['balance'])) ?></span></a>
+      <a class="balance-chip" href="<?= e(url('/funds')) ?>" title="<?= \App\Services\CurrencyService::isConverted() ? e('Balance kept in ' . \App\Services\CurrencyService::base()['code'] . ': ' . money_base($user['balance']) . ' (shown converted)') : 'Add funds' ?>"><?= icon('wallet') ?> <span class="label hide-xs">Balance</span> <span><?= e(money($user['balance'])) ?></span></a>
       <button class="icon-btn hide-xs" type="button" data-theme-toggle aria-label="Toggle dark mode"><?= icon('moon') ?></button>
       <a class="icon-btn" href="<?= e(url('/notifications')) ?>" aria-label="Notifications"><?= icon('bell') ?><?php if ($unread): ?><span class="notif-dot"><?= $unread > 9 ? '9+' : $unread ?></span><?php endif ?></a>
       <details class="dropdown">
@@ -61,6 +62,12 @@ $nav = [
           <a href="<?= e(url('/account/security')) ?>"><?= icon('shield') ?> Security</a>
           <a href="<?= e(url('/transactions')) ?>"><?= icon('receipt') ?> Transactions</a>
           <button type="button" data-theme-toggle><?= icon('sun') ?> Toggle theme</button>
+          <?php if (\App\Services\CurrencyService::switchEnabled()): $cur = \App\Services\CurrencyService::display(); ?>
+          <form method="post" action="<?= e(url('/account/currency')) ?>" class="dropdown-form"><?= csrf_field() ?>
+            <label class="text-xs text-muted" for="topbar-currency">Display currency</label>
+            <select class="select select-sm" id="topbar-currency" name="currency" data-autosubmit><?php foreach (\App\Services\CurrencyService::all() as $c): ?><option value="<?= e($c['code']) ?>"<?= $c['code'] === $cur['code'] ? ' selected' : '' ?>><?= e($c['code'] . ' (' . $c['symbol'] . ')') ?></option><?php endforeach ?></select>
+          </form>
+          <?php endif ?>
           <div class="sep"></div>
           <form method="post" action="<?= e(url('/logout')) ?>"><?= csrf_field() ?><button type="submit"><?= icon('logout') ?> Sign out</button></form>
         </div>

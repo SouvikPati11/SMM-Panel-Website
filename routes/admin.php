@@ -45,6 +45,9 @@ $router->group(['prefix' => $prefix, 'middleware' => ['csrf']], static function 
         $router->post('/orders/{id}/refund', [Admin\OrderController::class, 'refund'], 'admin.orders.refund', ['perm:orders.manage']);
         $router->post('/orders/{id}/resolve', [Admin\OrderController::class, 'resolve'], 'admin.orders.resolve', ['perm:orders.manage']);
         $router->post('/orders/{id}/sync', [Admin\OrderController::class, 'sync'], 'admin.orders.sync', ['perm:orders.manage']);
+        $router->get('/subscriptions', [Admin\SubscriptionController::class, 'index'], 'admin.subscriptions', ['perm:orders.view']);
+        $router->get('/subscriptions/{id}', [Admin\SubscriptionController::class, 'show'], 'admin.subscriptions.show', ['perm:orders.view']);
+        $router->post('/subscriptions/{id}/action', [Admin\SubscriptionController::class, 'action'], 'admin.subscriptions.action', ['perm:orders.manage']);
         $router->get('/refills', [Admin\OrderController::class, 'refills'], 'admin.refills', ['perm:orders.view']);
         $router->post('/refills/{id}', [Admin\OrderController::class, 'refillUpdate'], 'admin.refills.update', ['perm:orders.manage']);
 
@@ -134,6 +137,8 @@ $router->group(['prefix' => $prefix, 'middleware' => ['csrf']], static function 
         $router->get('/price-levels', [Admin\SettingsController::class, 'levels'], 'admin.levels', ['perm:settings.manage']);
         $router->post('/price-levels/save', [Admin\SettingsController::class, 'saveLevel'], 'admin.levels.save', ['perm:settings.manage']);
         $router->post('/price-levels/{id}/delete', [Admin\SettingsController::class, 'deleteLevel'], 'admin.levels.delete', ['perm:settings.manage']);
+        $router->get('/currencies', [Admin\SettingsController::class, 'currencies'], 'admin.currencies', ['perm:settings.manage']);
+        $router->post('/currencies/save', [Admin\SettingsController::class, 'saveCurrency'], 'admin.currencies.save', ['perm:settings.manage']);
 
         // System
         $router->get('/admins', [Admin\AdminController::class, 'index'], 'admin.admins', ['perm:admins.manage']);

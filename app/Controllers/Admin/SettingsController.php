@@ -30,14 +30,17 @@ final class SettingsController extends Controller
         ],
         'currency' => [
             'currency_code' => 'required|regex:/^[A-Z]{3}$/', 'currency_symbol' => 'required|max:5', 'currency_position' => 'required|in:before,after', 'currency_decimals' => 'required|in:0,2,3,4',
+            'currency_switch_enabled' => 'boolean',
         ],
         'users' => [
-            'registration_enabled' => 'boolean', 'email_verification' => 'boolean', 'login_max_attempts' => 'required|integer|min:3|max:50',
+            'registration_enabled' => 'boolean', 'email_verification' => 'boolean', 'registration_mobile' => 'boolean', 'registration_mobile_required' => 'boolean',
+            'login_max_attempts' => 'required|integer|min:3|max:50',
             'login_lockout_minutes' => 'required|integer|min:1|max:1440', 'default_price_level' => 'integer',
         ],
         'orders' => [
             'min_order_amount' => 'decimal|min:0', 'mass_order_enabled' => 'boolean', 'mass_order_max_lines' => 'required|integer|min:1|max:500',
             'order_cancel_enabled' => 'boolean', 'refill_enabled' => 'boolean', 'order_sync_batch' => 'required|integer|min:10|max:1000',
+            'subscriptions_enabled' => 'boolean', 'subscription_max_cycles' => 'required|integer|min:2|max:1000',
         ],
         'funds' => [
             'min_deposit' => 'required|decimal|min:0', 'max_deposit' => 'required|decimal|min:1', 'payment_expiry_minutes' => 'required|integer|min:10|max:2880',
@@ -92,6 +95,14 @@ final class SettingsController extends Controller
                     $input[$key] = '';
                 }
             }
+        }
+        if ($tab === 'users' && $input['email_verification'] === '1' && setting('email_verification', '0') !== '1') {
+            // Existing accounts keep working: verification applies to accounts created
+            // (or emails changed) from now on. See AuthService::needsVerification().
+            $input['email_verification_since'] = now();
+        }
+        if ($tab === 'users' && $input['registration_mobile'] !== '1') {
+            $input['registration_mobile_required'] = '0';
         }
         $changed = [];
         foreach ($input as $k => $v) {
@@ -169,26 +180,61 @@ final class SettingsController extends Controller
         return Response::redirect(admin_url('seo'));
     }
 
+    public function currencies(Request $request): Response
+    {
+        return $this->view('admin/settings/currencies', [
+            'title' => 'Currencies',
+            'base' => \App\Services\CurrencyService::base(),
+            'currencies' => \App\Services\CurrencyService::all(false),
+            'users' => Database::instance()->fetchPairs('SELECT currency, COUNT(*) FROM users WHERE currency IS NOT NULL GROUP BY currency'),
+        ]);
+    }
+
+    public function saveCurrency(Request $request): Response
+    {
+        $original = $request->str('original') ?: null;
+        $code = \App\Services\CurrencyService::save($request->post() + ['enabled' => $request->bool('enabled')], $original);
+        AuditService::log('currency.save', 'currency', $code, ['rate' => $request->str('rate'), 'enabled' => $request->bool('enabled'), 'new' => $original === null]);
+        $this->success("{$code} saved. Only displayed prices change; stored balances and ledger values are never converted.");
+        return Response::redirect(admin_url('currencies'));
+    }
+
     public function levels(Request $request): Response
     {
-        return $this->view('admin/settings/levels', ['title' => 'Price levels', 'levels' => Database::instance()->fetchAll('SELECT l.*, (SELECT COUNT(*) FROM users u WHERE u.price_level_id = l.id) AS users FROM price_levels l ORDER BY discount_percent')]);
+        return $this->view('admin/settings/levels', ['title' => 'Price levels', 'levels' => Database::instance()->fetchAll(
+            'SELECT l.*, (SELECT COUNT(*) FROM users u WHERE u.price_level_id = l.id AND u.deleted_at IS NULL) AS users,
+                    (SELECT COUNT(*) FROM users u WHERE u.price_level_id = l.id AND u.price_level_manual = 1 AND u.deleted_at IS NULL) AS manual_users
+             FROM price_levels l ORDER BY l.min_deposit IS NULL, l.min_deposit, l.discount_percent'
+        )]);
     }
 
     public function saveLevel(Request $request): Response
     {
-        $data = Validator::check($request->post(), ['name' => 'required|max:60', 'discount_percent' => 'required|decimal|min:0|max:100']);
+        $data = Validator::check($request->post(), ['name' => 'required|max:60', 'description' => 'max:500', 'discount_percent' => 'required|decimal|min:0|max:100', 'min_deposit' => 'decimal|min:0|max:100000000']);
         $db = Database::instance();
-        $row = ['name' => $data['name'], 'discount_percent' => Money::of($data['discount_percent'], 2)];
+        $row = [
+            'name' => $data['name'],
+            'description' => $data['description'] !== '' && $data['description'] !== null ? mb_substr((string) $data['description'], 0, 500) : null,
+            'discount_percent' => Money::of($data['discount_percent'], 2),
+            // Empty = manual-only (assigned by an admin, never automatically).
+            'min_deposit' => (string) ($data['min_deposit'] ?? '') === '' ? null : Money::of($data['min_deposit'], 4),
+        ];
         $id = $request->int('id');
-        $id ? $db->update('price_levels', $row, ['id' => $id]) : $db->insert('price_levels', $row + ['created_at' => now()]);
-        AuditService::log('price_level.save', 'price_level', $id ?: null, $row);
-        $this->success('Price level saved.');
+        if ($row['min_deposit'] !== null && $db->fetchColumn('SELECT id FROM price_levels WHERE min_deposit = ? AND id <> ?', [$row['min_deposit'], $id])) {
+            throw new ValidationException('Another level already uses this minimum deposit.');
+        }
+        $id ? $db->update('price_levels', $row, ['id' => $id]) : ($id = $db->insert('price_levels', $row + ['created_at' => now()]));
+        $moved = \App\Services\PriceLevelService::syncAll();
+        AuditService::log('price_level.save', 'price_level', $id, $row + ['users_reassigned' => $moved]);
+        $this->success('Price level saved.' . ($moved ? " {$moved} user(s) moved to their new automatic level." : ''));
         return Response::redirect(admin_url('price-levels'));
     }
 
     public function deleteLevel(Request $request, int $id): Response
     {
         Database::instance()->delete('price_levels', ['id' => $id]); // users fall back to no level (FK SET NULL)
+        Database::instance()->query('UPDATE users SET price_level_manual = 0 WHERE price_level_id IS NULL AND price_level_manual = 1');
+        \App\Services\PriceLevelService::syncAll();
         AuditService::log('price_level.delete', 'price_level', $id);
         $this->success('Price level deleted.');
         return Response::redirect(admin_url('price-levels'));

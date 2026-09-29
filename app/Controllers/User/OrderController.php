@@ -10,7 +10,10 @@ use App\Core\Exceptions\ValidationException;
 use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Money;
+use App\Helpers\Platforms;
 use App\Services\OrderService;
+use App\Services\SubscriptionService;
 
 final class OrderController extends Controller
 {
@@ -19,15 +22,16 @@ final class OrderController extends Controller
     {
         $db = Database::instance();
         $categories = $db->fetchAll(
-            "SELECT DISTINCT c.id, c.name FROM categories c JOIN services s ON s.category_id = c.id
+            "SELECT DISTINCT c.id, c.name, c.sort_order FROM categories c JOIN services s ON s.category_id = c.id
              WHERE c.status = 'active' AND s.status = 'active' AND s.is_hidden = 0 ORDER BY c.sort_order, c.name"
         );
         $rows = $db->fetchAll(
-            "SELECT s.id, s.category_id, s.name, s.rate, s.type, s.link_label, s.min_quantity, s.max_quantity, s.dripfeed, s.refill, s.cancel, s.average_time, s.custom_fields
+            "SELECT s.id, s.category_id, s.name, s.rate, s.type, s.link_label, s.min_quantity, s.max_quantity, s.dripfeed, s.subscription_enabled, s.refill, s.cancel, s.average_time, s.custom_fields
              FROM services s JOIN categories c ON c.id = s.category_id
              WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active' ORDER BY c.sort_order, s.sort_order, s.id"
         );
         $services = [];
+        $subs = SubscriptionService::enabled();
         foreach ($rows as $s) {
             $custom = json_decode((string) $s['custom_fields'], true) ?: [];
             $services[] = [
@@ -36,10 +40,11 @@ final class OrderController extends Controller
                 'lt' => $custom['link_type'] ?? 'url',
                 'mi' => (int) $s['min_quantity'], 'ma' => (int) $s['max_quantity'],
                 'df' => (int) $s['dripfeed'] === 1, 'rf' => (int) $s['refill'] === 1, 'cn' => (int) $s['cancel'] === 1,
+                'sb' => $subs && (int) $s['subscription_enabled'] === 1,
                 't' => (string) $s['average_time'], 'pk' => OrderService::TYPES[$s['type']]['package'] ?? false,
             ];
         }
-        return [array_map(static fn ($c) => ['id' => (int) $c['id'], 'n' => $c['name']], $categories), $services];
+        return [array_map(static fn ($c) => ['id' => (int) $c['id'], 'n' => $c['name'], 'p' => Platforms::detect($c['name'])], $categories), $services];
     }
 
     public function create(Request $request): Response
@@ -53,13 +58,15 @@ final class OrderController extends Controller
             'services' => $services,
             'preselect' => $request->int('service') ?: null,
             'formKey' => bin2hex(random_bytes(16)),
+            'intervals' => SubscriptionService::INTERVALS,
+            'maxCycles' => SubscriptionService::maxCycles(),
         ]);
     }
 
-    public function store(Request $request): Response
+    /** Order input from the request (shared by quote and store). */
+    private function orderInput(Request $request): array
     {
-        $user = $this->user();
-        $input = [
+        return [
             'link' => $request->str('link'),
             'quantity' => $request->str('quantity'),
             'comments' => (string) ($request->post()['comments'] ?? ''),
@@ -67,18 +74,105 @@ final class OrderController extends Controller
             'username' => $request->str('username'),
             'answer_number' => $request->str('answer_number'),
             'keywords' => $request->str('keywords'),
-            'dripfeed' => $request->str('dripfeed'),
+            'dripfeed' => $request->str('order_type') === 'subscription' ? '' : $request->str('dripfeed'),
             'runs' => $request->str('runs'),
             'interval' => $request->str('interval'),
         ];
-        $order = OrderService::place((int) $user['id'], $request->int('service'), $input, 'web', $request->str('form_key') ?: null);
-        if (!empty($order['duplicate'])) {
-            $this->success('This order was already placed (#' . $order['id'] . ').');
-        } elseif ($order['status'] === 'failed') {
-            $this->error('Order #' . $order['id'] . ' was rejected by the provider and fully refunded.');
-        } else {
-            $this->success('Order #' . $order['id'] . ' placed — ' . money($order['charge']) . ' charged.');
+    }
+
+    /**
+     * Server-side price quote for the confirmation dialog: validates exactly like
+     * placing the order but writes nothing. The browser never decides the price.
+     */
+    public function quote(Request $request): Response
+    {
+        $user = $this->user();
+        $service = OrderService::orderableService($request->int('service'));
+        $isSub = $request->str('order_type') === 'subscription';
+        $input = $this->orderInput($request);
+        if ($isSub) {
+            unset($input['dripfeed'], $input['runs'], $input['interval']);
         }
+        $params = OrderService::validateInput($service, $input);
+        $rate = OrderService::userRate($service, $user);
+        $charge = OrderService::computeCharge($service, $rate, $params['quantity'], $params['runs']);
+        $minOrder = (string) setting('min_order_amount', '0');
+        if (!Money::isPositive($charge)) {
+            throw new ValidationException('This order amount is too small to process.');
+        }
+        if (Money::isNumeric($minOrder) && Money::cmp($charge, $minOrder) < 0) {
+            throw new ValidationException('The minimum order amount is ' . money($minOrder) . '.');
+        }
+        $package = OrderService::TYPES[$service['type']]['package'] ?? false;
+        $out = [
+            'ok' => true,
+            'service' => ['id' => (int) $service['id'], 'name' => $service['name'], 'refill' => (int) $service['refill'] === 1, 'cancel' => (int) $service['cancel'] === 1, 'average_time' => (string) $service['average_time']],
+            'link' => $params['link'],
+            'quantity' => $params['quantity'],
+            'runs' => $params['runs'],
+            'interval' => $params['interval'],
+            'extra' => $params['extra'],
+            'rate' => rate($rate) . ($package ? ' per package' : ' per 1000'),
+            'charge' => money($charge),
+            'charge_base' => money_base($charge),
+            'balance' => money($user['balance']),
+            'insufficient' => Money::cmp((string) $user['balance'], $charge) < 0,
+            'notes' => [],
+        ];
+        if ($params['runs']) {
+            $out['notes'][] = "Drip-feed: {$params['runs']} runs every {$params['interval']} min (total " . number_format($params['quantity'] * $params['runs']) . ').';
+        }
+        if ($isSub) {
+            if ((int) $service['subscription_enabled'] !== 1 || !SubscriptionService::enabled()) {
+                throw new ValidationException('This service does not support auto-subscriptions.');
+            }
+            $hours = $request->int('sub_interval');
+            $cycles = $request->int('sub_cycles');
+            if (!isset(SubscriptionService::INTERVALS[$hours])) {
+                throw new ValidationException('Choose how often the order should repeat.');
+            }
+            if ($cycles < 2 || $cycles > SubscriptionService::maxCycles()) {
+                throw new ValidationException('Number of deliveries must be between 2 and ' . SubscriptionService::maxCycles() . '.');
+            }
+            $out['subscription'] = [
+                'interval' => SubscriptionService::INTERVALS[$hours],
+                'cycles' => $cycles,
+                'per_delivery' => money($charge),
+                'estimated_total' => money(Money::mul($charge, (string) $cycles)),
+            ];
+            $out['notes'][] = 'The first delivery is charged now; each later delivery is charged from your balance when it is placed, at the price at that time.';
+        }
+        return $this->json($out);
+    }
+
+    public function store(Request $request): Response
+    {
+        $user = $this->user();
+        $formKey = $request->str('form_key') ?: null;
+        if ($request->str('order_type') === 'subscription') {
+            $sub = SubscriptionService::create((int) $user['id'], $request->int('service'), $this->orderInput($request), $request->int('sub_interval'), $request->int('sub_cycles'), $formKey ? 'web:' . $formKey : null);
+            $msg = !empty($sub['duplicate']) ? 'This subscription was already created (#' . $sub['id'] . ').' : 'Subscription #' . $sub['id'] . ' created — first delivery ordered (order #' . $sub['last_order_id'] . ').';
+            if ($request->wantsJson()) {
+                return $this->json(['ok' => true, 'type' => 'subscription', 'subscription_id' => (int) $sub['id'], 'order_id' => (int) $sub['last_order_id'], 'message' => $msg, 'url' => url('/subscriptions/' . $sub['id']), 'form_key' => bin2hex(random_bytes(16))]);
+            }
+            $this->success($msg);
+            return $this->redirect('/subscriptions/' . $sub['id']);
+        }
+        $order = OrderService::place((int) $user['id'], $request->int('service'), $this->orderInput($request), 'web', $formKey);
+        if (!empty($order['duplicate'])) {
+            $msg = 'This order was already placed (#' . $order['id'] . ').';
+            $ok = true;
+        } elseif ($order['status'] === 'failed') {
+            $msg = 'Order #' . $order['id'] . ' was rejected by the provider and fully refunded.';
+            $ok = false;
+        } else {
+            $msg = 'Order #' . $order['id'] . ' placed — ' . money($order['charge']) . ' charged.';
+            $ok = true;
+        }
+        if ($request->wantsJson()) {
+            return $this->json(['ok' => $ok, 'type' => 'order', 'order_id' => (int) $order['id'], 'status' => $order['status'], 'charge' => money($order['charge']), 'balance' => money(\App\Services\WalletService::balance((int) $user['id'])), 'message' => $msg, 'url' => url('/orders/' . $order['id']), 'form_key' => bin2hex(random_bytes(16))]);
+        }
+        $ok ? $this->success($msg) : $this->error($msg);
         return $this->redirect('/orders/' . $order['id']);
     }
 
@@ -140,6 +234,12 @@ final class OrderController extends Controller
             $where .= ' AND o.status = ?';
             $params[] = $status;
         }
+        $type = $request->str('type');
+        if ($type === 'subscription') {
+            $where .= ' AND o.subscription_id IS NOT NULL';
+        } elseif ($type === 'single') {
+            $where .= ' AND o.subscription_id IS NULL';
+        }
         if ($q !== '') {
             if (ctype_digit($q)) {
                 $where .= ' AND o.id = ?';
@@ -150,7 +250,7 @@ final class OrderController extends Controller
             }
         }
         $orders = Paginator::query(
-            'o.id, o.link, o.quantity, o.charge, o.start_count, o.remains, o.status, o.created_at, o.runs, o.service_id, s.name AS service, s.refill AS can_refill, s.cancel AS can_cancel',
+            'o.id, o.link, o.quantity, o.charge, o.start_count, o.remains, o.status, o.created_at, o.runs, o.service_id, o.subscription_id, o.subscription_cycle, s.name AS service, s.refill AS can_refill, s.cancel AS can_cancel',
             "FROM orders o JOIN services s ON s.id = o.service_id {$where}",
             $params,
             'o.id DESC',
@@ -158,7 +258,7 @@ final class OrderController extends Controller
             25
         );
         $counts = Database::instance()->fetchPairs('SELECT status, COUNT(*) FROM orders WHERE user_id = ? GROUP BY status', [(int) $user['id']]);
-        return $this->view('user/orders', ['title' => 'My orders', 'orders' => $orders, 'status' => $status, 'q' => $q, 'counts' => $counts]);
+        return $this->view('user/orders', ['title' => 'My orders', 'orders' => $orders, 'status' => $status, 'type' => $type, 'q' => $q, 'counts' => $counts]);
     }
 
     public function show(Request $request, int $id): Response

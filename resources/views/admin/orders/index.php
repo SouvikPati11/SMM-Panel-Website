@@ -9,7 +9,8 @@
 </div>
 <form class="toolbar" method="get" action="<?= e(admin_url('orders')) ?>">
   <?php if ($f['status']): ?><input type="hidden" name="status" value="<?= e($f['status']) ?>"><?php endif ?>
-  <input class="input" type="search" name="q" value="<?= e($f['q']) ?>" placeholder="Order ID, provider ID, link or username">
+  <input class="input toolbar-search" type="search" name="q" value="<?= e($f['q']) ?>" placeholder="Order ID, provider ID, link or username" aria-label="Search orders">
+  <select class="select" name="type" aria-label="Order type"><option value="">All types</option><option value="single"<?= $f['type'] === 'single' ? ' selected' : '' ?>>One-time</option><option value="subscription"<?= $f['type'] === 'subscription' ? ' selected' : '' ?>>Subscription</option></select>
   <select class="select" name="provider"><option value="">All providers</option><?php foreach ($providers as $id => $n): ?><option value="<?= (int) $id ?>"<?= $f['provider'] === (int) $id ? ' selected' : '' ?>><?= e($n) ?></option><?php endforeach ?></select>
   <input class="input" type="date" name="from" value="<?= e($f['from']) ?>" aria-label="From date" style="max-width:170px">
   <input class="input" type="date" name="to" value="<?= e($f['to']) ?>" aria-label="To date" style="max-width:170px">
@@ -18,13 +19,12 @@
 <div class="card">
   <?php if (!$orders->items): ?><div class="empty"><?= icon('list') ?><h3>No orders found</h3></div><?php else: ?>
   <div class="table-wrap"><table class="table table-cards">
-    <thead><tr><th>ID</th><th>User</th><th>Service</th><th>Link</th><th class="num">Qty</th><th class="num">Charge</th><th>Provider</th><th>Status</th><th>Date</th></tr></thead>
+    <thead><tr><th>ID</th><th>User</th><th>Service &amp; link</th><th class="num">Qty</th><th class="num">Charge</th><th>Provider</th><th>Status</th><th>Date</th></tr></thead>
     <tbody><?php foreach ($orders->items as $o): ?>
       <tr class="<?= (int) $o['needs_attention'] ? 'row-attention' : '' ?>">
         <td data-label="ID"><a class="mono" href="<?= e(admin_url('orders/' . $o['id'])) ?>">#<?= (int) $o['id'] ?></a></td>
         <td data-label="User"><a href="<?= e(admin_url('users/' . $o['user_id'])) ?>"><?= e($o['username']) ?></a></td>
-        <td class="cell-main"><span class="cell-title"><?= e(str_limit($o['service'], 50)) ?></span><div class="cell-sub">svc <?= (int) $o['service_id'] ?> · <?= e($o['source']) ?></div></td>
-        <td data-label="Link" class="link-cell"><?= link_html($o['link']) ?></td>
+        <td class="cell-main"><span class="cell-title"><?= e(str_limit($o['service'], 50)) ?></span><div class="cell-sub">svc <?= (int) $o['service_id'] ?> · <?= e($o['source']) ?></div><?php if ($o['subscription_id']): ?><a class="badge badge-purple no-dot" href="<?= e(admin_url('subscriptions/' . $o['subscription_id'])) ?>">Sub #<?= (int) $o['subscription_id'] ?> · <?= (int) $o['subscription_cycle'] ?></a><?php endif ?><div class="cell-sub link-line"><?= link_html($o['link']) ?></div></td>
         <td data-label="Qty" class="num"><?= number_format((int) $o['quantity']) ?></td>
         <td data-label="Charge" class="num nowrap"><?= e(money($o['charge'])) ?></td>
         <td data-label="Provider" class="text-sm"><?= e($o['provider'] ?: 'Manual') ?><?php if ($o['provider_order_id']): ?><div class="cell-sub mono"><?= e($o['provider_order_id']) ?></div><?php endif ?></td>

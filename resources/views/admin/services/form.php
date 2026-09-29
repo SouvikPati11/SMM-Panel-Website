@@ -44,6 +44,7 @@
       <?= Form::input('refill_days', 'Refill period (days)', $s['refill_days'] ?? 30, ['type' => 'number', 'min' => 0]) ?>
       <?= Form::toggle('cancel', 'Cancel available', (int) ($s['cancel'] ?? 0) === 1) ?>
       <?= Form::toggle('dripfeed', 'Drip-feed available', (int) ($s['dripfeed'] ?? 0) === 1) ?>
+      <?= Form::toggle('subscription_enabled', 'Allow auto-subscriptions', (int) ($s['subscription_enabled'] ?? 0) === 1, 'Users can repeat this order automatically (every hour … every week, 2–' . (int) setting('subscription_max_cycles', '100') . ' deliveries). Each delivery is a normal order, charged when placed.') ?>
       <hr>
       <?= Form::select('status', 'Status', ['active' => 'Active', 'disabled' => 'Disabled'], $s['status'] ?? 'active') ?>
       <?= Form::toggle('is_hidden', 'Hidden from users (API & catalog)', (int) ($s['is_hidden'] ?? 0) === 1) ?>

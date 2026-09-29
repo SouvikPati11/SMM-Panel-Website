@@ -3,7 +3,7 @@
   <?php if ($payment['status'] === 'completed'): ?>
     <div class="stat-icon success" style="margin:0 auto 14px;width:56px;height:56px"><?= icon('check-circle') ?></div>
     <h1>Payment confirmed</h1>
-    <p class="text-muted"><?= e(money($payment['amount'])) ?> has been added to your balance<?= \App\Core\Money::isPositive((string) $payment['bonus_amount']) ? ' plus a ' . e(money($payment['bonus_amount'])) . ' bonus' : '' ?>.</p>
+    <p class="text-muted"><?= e(money_base($payment['amount'])) ?> has been added to your balance<?= \App\Core\Money::isPositive((string) $payment['bonus_amount']) ? ' plus a ' . e(money_base($payment['bonus_amount'])) . ' bonus' : '' ?>.</p>
     <a class="btn btn-primary" href="<?= e(url('/order')) ?>">Place an order</a>
   <?php elseif ($payment['status'] === 'pending'): ?>
     <div class="stat-icon warning" style="margin:0 auto 14px;width:56px;height:56px"><?= icon('clock') ?></div>

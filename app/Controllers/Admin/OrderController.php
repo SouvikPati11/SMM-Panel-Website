@@ -26,6 +26,12 @@ final class OrderController extends Controller
             $where .= ' AND o.status = ?';
             $params[] = $status;
         }
+        $type = $request->str('type');
+        if ($type === 'subscription') {
+            $where .= ' AND o.subscription_id IS NOT NULL';
+        } elseif ($type === 'single') {
+            $where .= ' AND o.subscription_id IS NULL';
+        }
         if ($request->bool('attention')) {
             $where .= ' AND o.needs_attention = 1';
         }
@@ -76,7 +82,7 @@ final class OrderController extends Controller
             'counts' => $db->fetchPairs('SELECT status, COUNT(*) FROM orders GROUP BY status'),
             'attention' => (int) $db->fetchColumn('SELECT COUNT(*) FROM orders WHERE needs_attention = 1'),
             'providers' => $db->fetchPairs('SELECT id, name FROM providers ORDER BY name'),
-            'f' => ['status' => $status, 'q' => $q, 'provider' => $request->int('provider'), 'from' => $from, 'to' => $to, 'attention' => $request->bool('attention')],
+            'f' => ['status' => $status, 'q' => $q, 'provider' => $request->int('provider'), 'from' => $from, 'to' => $to, 'attention' => $request->bool('attention'), 'type' => $type],
         ]);
     }
 
@@ -104,8 +110,8 @@ final class OrderController extends Controller
     {
         $start = $request->str('start_count');
         $remains = $request->str('remains');
-        OrderService::adminSetStatus($id, $request->str('status'), $start !== '' ? (int) $start : null, $remains !== '' ? (int) $remains : null, (int) $this->admin()['id']);
-        $this->success('Order updated.');
+        $refunded = OrderService::adminSetStatus($id, $request->str('status'), $start !== '' ? (int) $start : null, $remains !== '' ? (int) $remains : null, (int) $this->admin()['id'], $request->str('reason'));
+        $this->success('Order updated.' . (\App\Core\Money::isPositive($refunded) ? ' Refunded ' . money($refunded) . ' to the user.' : ' No balance change.'));
         return Response::redirect(admin_url('orders/' . $id));
     }
 

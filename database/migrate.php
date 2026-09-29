@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 /*
  * Apply pending schema upgrades (safe to re-run):  php database/migrate.php
- * Needed when updating an existing installation to a newer version.
+ * Needed when updating an existing installation to a newer version. Works with
+ * the PHP CLI and with web binaries (lsphp/php-cgi) started from cron; refuses HTTP.
  */
-if (PHP_SAPI !== 'cli') {
+if (!empty($_SERVER['REQUEST_METHOD'])) {
     http_response_code(403);
     exit('Forbidden');
 }
 require dirname(__DIR__) . '/app/bootstrap.php';
 
 $applied = App\Install\Migrator::run();
-echo $applied ? 'Applied: ' . implode(', ', $applied) . PHP_EOL : 'Database schema is up to date.' . PHP_EOL;
+App\Core\Cli::stdout($applied ? 'Applied: ' . implode(', ', $applied) : 'Database schema is up to date.');

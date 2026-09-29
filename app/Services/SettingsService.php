@@ -39,9 +39,13 @@ final class SettingsService
         'currency_symbol' => '$',
         'currency_position' => 'before',
         'currency_decimals' => '2',
+        'currency_switch_enabled' => '1',
         // Users
         'registration_enabled' => '1',
         'email_verification' => '0',
+        'email_verification_since' => '', // users created before verification was switched on are not blocked
+        'registration_mobile' => '0',
+        'registration_mobile_required' => '0',
         'login_max_attempts' => '5',
         'login_lockout_minutes' => '15',
         'default_price_level' => '',
@@ -52,6 +56,8 @@ final class SettingsService
         'order_cancel_enabled' => '1',
         'refill_enabled' => '1',
         'order_sync_batch' => '100',
+        'subscriptions_enabled' => '1',
+        'subscription_max_cycles' => '100',
         // Funds
         'min_deposit' => '1',
         'max_deposit' => '10000',

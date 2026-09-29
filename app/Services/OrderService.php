@@ -189,8 +189,9 @@ final class OrderService
     /**
      * Charge the user and create the order, then try to submit it to the provider.
      * Safe against double-click / replays through $idempotencyKey.
+     * @param array{subscription_id?:int, subscription_cycle?:int} $attach links the order to an auto-subscription cycle
      */
-    public static function place(int $userId, int $serviceId, array $input, string $source = 'web', ?string $idempotencyKey = null, bool $submitNow = true): array
+    public static function place(int $userId, int $serviceId, array $input, string $source = 'web', ?string $idempotencyKey = null, bool $submitNow = true, array $attach = []): array
     {
         $db = Database::instance();
         $user = $db->fetch('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL', [$userId]);
@@ -220,7 +221,7 @@ final class OrderService
         $manual = empty($service['provider_id']) || empty($service['provider_service_id']);
 
         try {
-            $orderId = $db->transaction(static function (Database $db) use ($userId, $service, $params, $rate, $charge, $source, $idempotencyKey, $manual): int {
+            $orderId = $db->transaction(static function (Database $db) use ($userId, $service, $params, $rate, $charge, $source, $idempotencyKey, $manual, $attach): int {
                 // Lock the wallet first so concurrent orders from the same user serialise.
                 $bal = (string) $db->fetchColumn('SELECT balance FROM wallets WHERE user_id = ? FOR UPDATE', [$userId]);
                 if (Money::cmp($bal, $charge) < 0) {
@@ -241,11 +242,13 @@ final class OrderService
                     'submit_state' => $manual ? 'manual' : 'queued',
                     'source' => $source,
                     'idempotency_key' => $idempotencyKey,
+                    'subscription_id' => $attach['subscription_id'] ?? null,
+                    'subscription_cycle' => $attach['subscription_cycle'] ?? null,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
                 WalletService::apply($userId, Money::negate($charge), 'order_charge', "order:{$orderId}:charge", "Order #{$orderId} — " . mb_substr($service['name'], 0, 150), ['order_id' => $orderId]);
-                self::log($orderId, 'created', null, 'pending', "Charged {$charge}", $source === 'api' ? 'api' : 'user');
+                self::log($orderId, 'created', null, 'pending', "Charged {$charge}" . (isset($attach['subscription_id']) ? " (subscription #{$attach['subscription_id']}, cycle {$attach['subscription_cycle']})" : ''), match ($source) { 'api' => 'api', 'subscription' => 'subscription', default => 'user' });
                 return $orderId;
             });
         } catch (\PDOException $e) {
@@ -462,25 +465,57 @@ final class OrderService
         }
     }
 
-    /** Admin manual status change (manual services or corrections). */
-    public static function adminSetStatus(int $orderId, string $status, ?int $startCount, ?int $remains, int $adminId): void
+    /**
+     * Status changes an admin may make, following the normal order lifecycle.
+     * Final statuses (completed, partial, cancelled, refunded, failed) are never
+     * changed here; a completed order can only be refunded explicitly (adminRefund).
+     * Money: partial → refunds the undelivered part, cancelled → refunds whatever is
+     * not yet refunded; all other transitions move no money. Refunds use unique
+     * ledger references per order and kind, so they can never run twice.
+     */
+    public const ADMIN_TRANSITIONS = [
+        'pending' => ['processing', 'in_progress', 'completed', 'partial', 'cancelled'],
+        'processing' => ['in_progress', 'completed', 'partial', 'cancelled'],
+        'in_progress' => ['completed', 'partial', 'cancelled'],
+    ];
+
+    /** @return list<string> statuses this order may be moved to by an admin */
+    public static function adminAllowedStatuses(array $order): array
     {
-        $allowed = ['pending', 'processing', 'in_progress', 'completed', 'partial', 'cancelled'];
-        if (!in_array($status, $allowed, true)) {
-            throw new ValidationException('Invalid status.');
+        return self::ADMIN_TRANSITIONS[$order['status']] ?? [];
+    }
+
+    /** Admin manual status change (manual services or corrections). Returns the amount refunded by this change. */
+    public static function adminSetStatus(int $orderId, string $status, ?int $startCount, ?int $remains, int $adminId, string $reason = ''): string
+    {
+        $reason = trim($reason);
+        if (mb_strlen($reason) < 3) {
+            throw new ValidationException('Enter a reason for the status change (kept in the order log and audit log).');
         }
         $order = self::find($orderId);
         if (!$order) {
             throw new ValidationException('Order not found.');
         }
         if (in_array($order['status'], self::FINAL_STATUSES, true)) {
-            throw new ValidationException('This order is already final (' . $order['status'] . ') and cannot be changed.');
+            throw new ValidationException('This order is already final (' . $order['status'] . ') and cannot be changed.' . ($order['status'] === 'completed' ? ' Use Refund to return the charge.' : ''));
         }
-        if ($status === 'partial' && ($remains === null || $remains <= 0)) {
-            throw new ValidationException('Enter the undelivered quantity (remains) for a partial order.');
+        if (!in_array($status, self::adminAllowedStatuses($order), true)) {
+            throw new ValidationException("Changing an order from {$order['status']} to {$status} is not allowed.");
         }
+        $total = (int) $order['quantity'] * max(1, (int) $order['runs']);
+        if ($status === 'partial' && ($remains === null || $remains <= 0 || $remains >= $total)) {
+            throw new ValidationException('For a partial order enter the undelivered quantity (between 1 and ' . max(1, $total - 1) . '). Use Cancelled when nothing was delivered.');
+        }
+        if ($remains !== null && ($remains < 0 || $remains > $total)) {
+            throw new ValidationException('Remains must be between 0 and ' . $total . '.');
+        }
+        $refundedBefore = (string) $order['refunded_amount'];
         self::applyStatus($orderId, new ProviderOrderStatus($status, $startCount, $remains), 'admin:' . $adminId);
-        AuditService::log('order.status', 'order', $orderId, ['status' => $status, 'remains' => $remains]);
+        $after = self::find($orderId);
+        $refunded = Money::sub((string) $after['refunded_amount'], $refundedBefore);
+        self::log($orderId, 'admin_status', $order['status'], $after['status'], 'Admin: ' . mb_substr($reason, 0, 400) . (Money::isPositive($refunded) ? ' — refunded ' . $refunded : ''), 'admin:' . $adminId);
+        AuditService::log('order.status', 'order', $orderId, ['from' => $order['status'], 'to' => $after['status'], 'reason' => $reason, 'remains' => $remains, 'start_count' => $startCount, 'refunded' => $refunded]);
+        return $refunded;
     }
 
     /** Admin full refund of whatever has not been refunded yet; marks order refunded. */

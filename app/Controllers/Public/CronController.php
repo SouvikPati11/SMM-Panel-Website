@@ -10,6 +10,7 @@ use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Response;
 use App\Services\CronService;
+use App\Services\CronStatus;
 
 /**
  * Optional HTTP trigger for hosts whose cron can only fetch URLs:
@@ -28,7 +29,17 @@ final class CronController extends Controller
             return Response::text('too frequent', 429);
         }
         @ignore_user_abort(true);
+        CronStatus::write(['invoked_at' => now(), 'finished_at' => null, 'stage' => 'running', 'exit_code' => null, 'error' => null, 'php_version' => PHP_VERSION, 'sapi' => PHP_SAPI . ' (URL trigger)', 'php_binary' => PHP_BINARY, 'script' => '/tasks/run']);
         $results = CronService::runDue();
-        return Response::json(array_map(static fn ($r) => $r['status'], $results));
+        $summary = array_map(static fn ($r) => $r['status'], $results);
+        $errors = [];
+        foreach ($results as $task => $r) {
+            if ($r['status'] === 'failed') {
+                $errors[] = "{$task}: " . ($r['output']['error'] ?? 'unknown error');
+            }
+        }
+        CronStatus::write(['finished_at' => now(), 'stage' => $errors ? 'failed' : 'done', 'exit_code' => $errors ? 1 : 0, 'error' => $errors ? implode(' | ', $errors) : null, 'summary' => $summary]
+            + ($errors ? ['last_error' => implode(' | ', $errors), 'last_error_at' => now()] : ['last_success_at' => now()]));
+        return Response::json($summary, $errors ? 500 : 200);
     }
 }

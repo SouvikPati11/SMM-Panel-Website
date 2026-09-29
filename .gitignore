@@ -5,6 +5,9 @@
 /storage/cache/*
 /storage/uploads/*
 /storage/installed.lock
+/storage/cron-status.json
+/storage/cron-check.json
+/storage/*.tmp
 /public/uploads/*
 !/storage/**/.htaccess
 !/storage/**/.gitkeep

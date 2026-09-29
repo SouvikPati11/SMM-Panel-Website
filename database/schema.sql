@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS price_levels (
   id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
   name             VARCHAR(60) NOT NULL,
+  description      VARCHAR(500) NULL,
   discount_percent DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  min_deposit      DECIMAL(18,4) NULL DEFAULT NULL,
   min_spent        DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
   created_at       DATETIME NOT NULL,
   PRIMARY KEY (id)
@@ -32,15 +34,19 @@ CREATE TABLE IF NOT EXISTS users (
   id                 INT UNSIGNED NOT NULL AUTO_INCREMENT,
   username           VARCHAR(40) NOT NULL,
   email              VARCHAR(190) NOT NULL,
+  mobile             VARCHAR(20) NULL,
   password_hash      VARCHAR(255) NOT NULL,
   name               VARCHAR(100) NULL,
   status             ENUM('active','suspended','banned') NOT NULL DEFAULT 'active',
   email_verified_at  DATETIME NULL,
+  email_changed_at   DATETIME NULL,
   price_level_id     INT UNSIGNED NULL,
+  price_level_manual TINYINT(1) NOT NULL DEFAULT 0,
   custom_discount    DECIMAL(5,2) NOT NULL DEFAULT 0.00,
   referral_code      VARCHAR(20) NOT NULL,
   referred_by        INT UNSIGNED NULL,
   timezone           VARCHAR(64) NULL,
+  currency           CHAR(3) NULL,
   twofa_secret       VARCHAR(255) NULL,
   twofa_enabled      TINYINT(1) NOT NULL DEFAULT 0,
   api_enabled        TINYINT(1) NOT NULL DEFAULT 1,
@@ -273,6 +279,7 @@ CREATE TABLE IF NOT EXISTS services (
   max_quantity        INT UNSIGNED NOT NULL DEFAULT 100000,
   average_time        VARCHAR(60) NULL,
   dripfeed            TINYINT(1) NOT NULL DEFAULT 0,
+  subscription_enabled TINYINT(1) NOT NULL DEFAULT 0,
   refill              TINYINT(1) NOT NULL DEFAULT 0,
   refill_days         SMALLINT UNSIGNED NOT NULL DEFAULT 30,
   cancel              TINYINT(1) NOT NULL DEFAULT 0,
@@ -313,8 +320,10 @@ CREATE TABLE IF NOT EXISTS orders (
   submit_state       ENUM('queued','submitting','submitted','unknown','manual','failed') NOT NULL DEFAULT 'queued',
   submit_attempts    TINYINT UNSIGNED NOT NULL DEFAULT 0,
   last_error         VARCHAR(500) NULL,
-  source             ENUM('web','mass','api','admin') NOT NULL DEFAULT 'web',
+  source             ENUM('web','mass','api','admin','subscription') NOT NULL DEFAULT 'web',
   idempotency_key    VARCHAR(64) NULL,
+  subscription_id    BIGINT UNSIGNED NULL,
+  subscription_cycle SMALLINT UNSIGNED NULL,
   cancel_requested   TINYINT(1) NOT NULL DEFAULT 0,
   needs_attention    TINYINT(1) NOT NULL DEFAULT 0,
   created_at         DATETIME NOT NULL,
@@ -330,6 +339,7 @@ CREATE TABLE IF NOT EXISTS orders (
   KEY idx_order_provider (provider_id, provider_order_id),
   KEY idx_order_service (service_id),
   KEY idx_order_created (created_at),
+  KEY idx_order_sub (subscription_id, subscription_cycle),
   CONSTRAINT fk_order_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_order_service FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE RESTRICT,
   CONSTRAINT fk_order_provider FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL
@@ -783,6 +793,66 @@ CREATE TABLE IF NOT EXISTS cron_runs (
   PRIMARY KEY (id),
   KEY idx_cron_task (task, started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Auto-subscriptions (see App\Services\SubscriptionService)
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id           INT UNSIGNED NOT NULL,
+  service_id        INT UNSIGNED NOT NULL,
+  link              VARCHAR(1000) NOT NULL,
+  quantity          INT UNSIGNED NOT NULL,
+  extra             TEXT NULL,
+  interval_hours    SMALLINT UNSIGNED NOT NULL,
+  total_cycles      SMALLINT UNSIGNED NOT NULL,
+  completed_cycles  SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  status            ENUM('active','paused','completed','cancelled','suspended') NOT NULL DEFAULT 'active',
+  next_run_at       DATETIME NULL,
+  locked_until      DATETIME NULL,
+  attempts          TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  last_error        VARCHAR(500) NULL,
+  last_order_id     BIGINT UNSIGNED NULL,
+  last_run_at       DATETIME NULL,
+  idempotency_key   VARCHAR(64) NULL,
+  cancelled_at      DATETIME NULL,
+  completed_at      DATETIME NULL,
+  created_at        DATETIME NOT NULL,
+  updated_at        DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_sub_idem (user_id, idempotency_key),
+  KEY idx_sub_due (status, next_run_at),
+  KEY idx_sub_user (user_id, created_at),
+  KEY idx_sub_service (service_id),
+  CONSTRAINT fk_sub_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sub_service FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS subscription_logs (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  subscription_id  BIGINT UNSIGNED NOT NULL,
+  event            VARCHAR(40) NOT NULL,
+  cycle            SMALLINT UNSIGNED NULL,
+  order_id         BIGINT UNSIGNED NULL,
+  message          VARCHAR(500) NULL,
+  actor            VARCHAR(40) NOT NULL DEFAULT 'system',
+  created_at       DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_sublog_sub (subscription_id, id),
+  CONSTRAINT fk_sublog_sub FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Additional display currencies (the site currency in settings is the base)
+CREATE TABLE IF NOT EXISTS currencies (
+  code        CHAR(3) NOT NULL,
+  name        VARCHAR(60) NOT NULL,
+  symbol      VARCHAR(8) NOT NULL,
+  position    ENUM('before','after') NOT NULL DEFAULT 'before',
+  decimals    TINYINT UNSIGNED NOT NULL DEFAULT 2,
+  rate        DECIMAL(20,8) NOT NULL DEFAULT 1.00000000,
+  enabled     TINYINT(1) NOT NULL DEFAULT 1,
+  sort_order  INT NOT NULL DEFAULT 0,
+  updated_at  DATETIME NOT NULL,
+  PRIMARY KEY (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version     VARCHAR(100) NOT NULL,

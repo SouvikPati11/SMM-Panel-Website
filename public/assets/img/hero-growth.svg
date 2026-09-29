@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 420" role="img" aria-labelledby="t d">
+  <title id="t">Social media growth dashboard</title>
+  <desc id="d">A phone showing a social profile with a rising followers chart, surrounded by like, follower and view notifications.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#eeecff"/><stop offset="1" stop-color="#f7f5ff"/></linearGradient>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b4dff" stop-opacity=".28"/><stop offset="1" stop-color="#5b4dff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="av" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6aa2"/><stop offset="1" stop-color="#7c5cff"/></linearGradient>
+    <filter id="sh" x="-50%" y="-60%" width="200%" height="260%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#281e96" flood-opacity=".16"/></filter>
+  </defs>
+  <circle cx="250" cy="215" r="190" fill="url(#bg)"/>
+  <circle cx="92" cy="96" r="7" fill="#c7c1ff"/><circle cx="420" cy="330" r="9" fill="#ffd2e2"/><circle cx="440" cy="120" r="5" fill="#bfeede"/>
+  <!-- phone -->
+  <g filter="url(#sh)">
+    <rect x="160" y="40" width="190" height="350" rx="30" fill="#141733"/>
+    <rect x="170" y="52" width="170" height="326" rx="22" fill="#fff"/>
+  </g>
+  <rect x="226" y="60" width="58" height="8" rx="4" fill="#141733"/>
+  <!-- profile -->
+  <circle cx="200" cy="100" r="18" fill="url(#av)"/>
+  <rect x="226" y="88" width="72" height="9" rx="4.5" fill="#1d2140"/>
+  <rect x="226" y="104" width="48" height="7" rx="3.5" fill="#c5c9dc"/>
+  <g font-family="Inter, system-ui, sans-serif" font-weight="700" fill="#1d2140" text-anchor="middle">
+    <text x="206" y="146" font-size="15">12.4K</text><text x="255" y="146" font-size="15">318</text><text x="304" y="146" font-size="15">98%</text>
+  </g>
+  <g font-family="Inter, system-ui, sans-serif" font-size="9" fill="#8b92ad" text-anchor="middle">
+    <text x="206" y="159">followers</text><text x="255" y="159">posts</text><text x="304" y="159">delivered</text>
+  </g>
+  <!-- chart -->
+  <rect x="184" y="176" width="142" height="104" rx="14" fill="#f5f4ff"/>
+  <path d="M194 262 L218 252 L238 256 L258 234 L278 238 L298 210 L316 196 L316 270 L194 270 Z" fill="url(#area)"/>
+  <path d="M194 262 L218 252 L238 256 L258 234 L278 238 L298 210 L316 196" fill="none" stroke="#5b4dff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="316" cy="196" r="5.5" fill="#fff" stroke="#5b4dff" stroke-width="3"/>
+  <!-- posts grid -->
+  <rect x="184" y="292" width="44" height="44" rx="9" fill="#ffe0ec"/><rect x="233" y="292" width="44" height="44" rx="9" fill="#e3e0ff"/><rect x="282" y="292" width="44" height="44" rx="9" fill="#d8f5ea"/>
+  <path d="M199 322l7-9 6 7 4-5 6 7z" fill="#ff6aa2"/><circle cx="255" cy="314" r="8" fill="#7c70ff"/><path d="M296 322l8-12 8 12z" fill="#1fb57a"/>
+  <!-- notification: followers -->
+  <g filter="url(#sh)"><rect x="18" y="150" width="150" height="54" rx="16" fill="#fff"/></g>
+  <circle cx="44" cy="177" r="15" fill="#e3e0ff"/>
+  <path d="M38 183a6 6 0 0 1 12 0M44 176a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7" fill="none" stroke="#5b4dff" stroke-width="2.2" stroke-linecap="round"/>
+  <text x="68" y="173" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700" fill="#1d2140">+1,250</text>
+  <text x="68" y="190" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8b92ad">new followers</text>
+  <!-- notification: likes -->
+  <g filter="url(#sh)"><rect x="332" y="92" width="134" height="54" rx="16" fill="#fff"/></g>
+  <circle cx="358" cy="119" r="15" fill="#ffe0ec"/>
+  <path d="M358 127s-9-5.5-9-11a4.8 4.8 0 0 1 9-2.4 4.8 4.8 0 0 1 9 2.4c0 5.5-9 11-9 11Z" fill="#ff4f8b"/>
+  <text x="382" y="115" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700" fill="#1d2140">+8.2K</text>
+  <text x="382" y="132" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8b92ad">likes today</text>
+  <!-- notification: views -->
+  <g filter="url(#sh)"><rect x="318" y="290" width="148" height="54" rx="16" fill="#fff"/></g>
+  <circle cx="344" cy="317" r="15" fill="#d8f5ea"/>
+  <path d="M336 317s3.5-6 8-6 8 6 8 6-3.5 6-8 6-8-6-8-6Z" fill="none" stroke="#1fb57a" stroke-width="2.2"/><circle cx="344" cy="317" r="2.2" fill="#1fb57a"/>
+  <text x="368" y="313" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700" fill="#1d2140">150K</text>
+  <text x="368" y="330" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8b92ad">video views</text>
+  <!-- order complete pill -->
+  <g filter="url(#sh)"><rect x="24" y="300" width="150" height="40" rx="20" fill="#5b4dff"/></g>
+  <path d="M42 320l5 5 9-10" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="64" y="325" font-family="Inter, system-ui, sans-serif" font-size="12" font-weight="700" fill="#fff">Order delivered</text>
+</svg>

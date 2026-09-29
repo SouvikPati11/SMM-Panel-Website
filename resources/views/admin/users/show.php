@@ -13,7 +13,7 @@
 
 <div class="grid-main">
   <div>
-    <div class="tabs"><?php foreach (['orders' => 'Orders', 'transactions' => 'Transactions', 'payments' => 'Payments', 'tickets' => 'Tickets', 'activity' => 'Login activity'] as $k => $l): ?><a class="<?= $tab === $k ? 'active' : '' ?>" href="<?= e($base . '?tab=' . $k) ?>"><?= e($l) ?></a><?php endforeach ?></div>
+    <div class="tabs"><?php foreach (['orders' => 'Orders', 'transactions' => 'Transactions', 'adjustments' => 'Balance adjustments', 'payments' => 'Payments', 'tickets' => 'Tickets', 'activity' => 'Login activity'] as $k => $l): ?><a class="<?= $tab === $k ? 'active' : '' ?>" href="<?= e($base . '?tab=' . $k) ?>"><?= e($l) ?></a><?php endforeach ?></div>
     <div class="card"><div class="table-wrap"><table class="table table-cards">
       <?php if ($tab === 'orders'): ?>
         <thead><tr><th>ID</th><th>Service</th><th class="num">Charge</th><th>Status</th><th>Date</th></tr></thead><tbody>
@@ -21,6 +21,9 @@
       <?php elseif ($tab === 'transactions'): ?>
         <thead><tr><th>ID</th><th>Type</th><th>Description</th><th class="num">Amount</th><th class="num">After</th><th>Date</th></tr></thead><tbody>
         <?php foreach ($list->items as $t): ?><tr><td data-label="ID" class="mono">#<?= (int) $t['id'] ?></td><td data-label="Type"><?= e(str_replace('_', ' ', $t['type'])) ?><?= $t['wallet'] === 'referral' ? ' (ref)' : '' ?></td><td class="cell-main"><?= e($t['description']) ?><?= $t['admin_id'] ? ' <span class="badge badge-purple no-dot">admin #' . (int) $t['admin_id'] . '</span>' : '' ?></td><td data-label="Amount" class="num fw-bold <?= Money::isNegative((string) $t['amount']) ? '' : 'text-success' ?>"><?= e(money($t['amount'], 4)) ?></td><td data-label="After" class="num"><?= e(money($t['balance_after'], 4)) ?></td><td data-label="Date" class="text-sm nowrap"><?= e(fmt_date($t['created_at'])) ?></td></tr><?php endforeach ?>
+      <?php elseif ($tab === 'adjustments'): ?>
+        <thead><tr><th>Tx</th><th>By</th><th>Reason</th><th class="num">Before</th><th class="num">Change</th><th class="num">After</th><th>Date</th></tr></thead><tbody>
+        <?php foreach ($list->items as $t): ?><tr><td data-label="Tx" class="mono">#<?= (int) $t['id'] ?></td><td data-label="By"><?= e($t['admin_name'] ?: 'admin #' . (int) $t['admin_id']) ?><div class="cell-sub"><?= e(str_replace('_', ' ', $t['type'])) ?></div></td><td class="cell-main break"><?= e(preg_replace('/^Admin: /', '', (string) $t['description'])) ?></td><td data-label="Before" class="num nowrap"><?= e(money($t['balance_before'], 4)) ?></td><td data-label="Change" class="num nowrap fw-bold <?= Money::isNegative((string) $t['amount']) ? 'text-danger' : 'text-success' ?>"><?= Money::isNegative((string) $t['amount']) ? '' : '+' ?><?= e(money($t['amount'], 4)) ?></td><td data-label="After" class="num nowrap"><?= e(money($t['balance_after'], 4)) ?></td><td data-label="Date" class="text-sm nowrap"><?= e(fmt_date($t['created_at'], 'M j, Y H:i:s')) ?></td></tr><?php endforeach ?>
       <?php elseif ($tab === 'payments'): ?>
         <thead><tr><th>ID</th><th>Gateway</th><th class="num">Amount</th><th>Status</th><th>Date</th></tr></thead><tbody>
         <?php foreach ($list->items as $p): ?><tr><td data-label="ID" class="mono">#<?= (int) $p['id'] ?></td><td data-label="Gateway"><?= e(\App\Services\PaymentService::gatewayLabel($p['gateway'])) ?></td><td data-label="Amount" class="num"><?= e(money($p['amount'])) ?></td><td data-label="Status"><?= status_badge($p['status']) ?></td><td data-label="Date" class="text-sm"><?= e(fmt_date($p['created_at'])) ?></td></tr><?php endforeach ?>
@@ -37,29 +40,36 @@
 
   <div>
     <?php if (can('users.balance')): ?>
-    <div class="card mb-2"><div class="card-header"><h2>Adjust balance</h2></div><div class="card-body">
-      <form method="post" action="<?= e($base . '/balance') ?>" data-confirm="Apply this balance change?"><?= csrf_field() ?>
-        <div class="form-grid">
-          <?= Form::select('direction', 'Action', ['add' => 'Add funds', 'subtract' => 'Subtract funds'], 'add') ?>
-          <?= Form::input('amount', 'Amount', '', ['type' => 'number', 'step' => '0.0001', 'min' => '0.0001', 'required' => true]) ?>
+    <div class="card mb-2"><div class="card-header"><h2>Add / remove balance</h2></div><div class="card-body">
+      <form method="post" action="<?= e($base . '/balance') ?>" data-confirm="Apply this balance change?"><?= csrf_field() ?><input type="hidden" name="adjust_key" value="<?= e($adjustKey) ?>">
+        <div class="segmented mb-2" role="radiogroup" aria-label="Add or remove">
+          <label><input type="radio" name="direction" value="add" checked> <span><?= icon('plus') ?> Add</span></label>
+          <label><input type="radio" name="direction" value="subtract"> <span><?= icon('x') ?> Remove</span></label>
         </div>
-        <?= Form::select('kind', 'Record as', ['manual_adjustment' => 'Manual adjustment', 'deposit' => 'Deposit (counts toward total deposits)', 'bonus' => 'Bonus'], 'manual_adjustment') ?>
-        <?= Form::input('reason', 'Reason (required, visible to user)', '', ['required' => true, 'maxlength' => 200]) ?>
+        <?= Form::input('amount', 'Amount (' . e(\App\Services\CurrencyService::base()['code']) . ')', '', ['type' => 'number', 'step' => '0.0001', 'min' => '0.0001', 'required' => true, 'inputmode' => 'decimal']) ?>
+        <?= Form::select('kind', 'Record as', ['manual_adjustment' => 'Manual adjustment', 'deposit' => 'Deposit (counts toward deposits and price level)', 'bonus' => 'Bonus'], 'manual_adjustment') ?>
+        <?= Form::input('reason', 'Reason (required, shown to the user)', '', ['required' => true, 'maxlength' => 200, 'attrs' => ['minlength' => 3]]) ?>
+        <p class="text-sm mb-1">Current balance <strong><?= e(money($user['balance'], 4)) ?></strong><?= (int) $user['allow_negative'] === 1 ? ' · negative balance allowed' : ' · cannot go below zero' ?></p>
         <button class="btn btn-primary btn-block" type="submit">Apply</button>
       </form>
-      <p class="hint mb-0">Every adjustment creates a ledger transaction with your admin ID and is written to the audit log.</p>
+      <p class="hint mb-0">Each change creates a ledger entry with the balance before and after, your admin account and the time, and an audit-log entry. See the <a href="<?= e($base . '?tab=adjustments') ?>">Balance adjustments</a> tab.</p>
     </div></div>
     <?php endif ?>
+
+    <div class="card mb-2"><div class="card-header"><h2>Price level</h2><?= $levelInfo['manual'] ? '<span class="badge badge-purple no-dot">manual</span>' : '<span class="badge badge-info no-dot">automatic</span>' ?></div><div class="card-body"><dl class="dl" style="grid-template-columns:140px minmax(0,1fr)">
+      <dt>Current level</dt><dd><?= e($levelInfo['current']['name'] ?? 'None') ?><?= !empty($levelInfo['current']) ? ' · ' . e($levelInfo['current']['discount_percent']) . '% off' : '' ?></dd>
+      <dt>Qualifying deposits</dt><dd><?= e(money($levelInfo['qualifying'])) ?> <span class="text-muted text-xs">(lifetime, credited only)</span></dd>
+      <dt>Next level</dt><dd><?= $levelInfo['next'] ? e($levelInfo['next']['name']) . ' at ' . e(money($levelInfo['next']['min_deposit'])) : '—' ?></dd>
+      <dt>Remaining</dt><dd><?= $levelInfo['next'] ? e(money($levelInfo['remaining'])) : '—' ?></dd>
+    </dl><?php if ($levelInfo['manual']): ?><p class="hint mb-0">Assigned by an admin, so deposits do not change it. Choose "Automatic" below to switch back.</p><?php endif ?></div></div>
 
     <?php if (can('users.manage')): ?>
     <div class="card mb-2"><div class="card-header"><h2>Edit user</h2></div><div class="card-body">
       <form method="post" action="<?= e($base) ?>"><?= csrf_field() ?>
         <?= Form::input('name', 'Name', $user['name']) ?>
         <?= Form::input('email', 'Email', $user['email'], ['type' => 'email', 'required' => true]) ?>
-        <div class="form-grid">
-          <?= Form::select('status', 'Status', ['active' => 'Active', 'suspended' => 'Suspended', 'banned' => 'Banned'], $user['status']) ?>
-          <?= Form::select('price_level_id', 'Price level', $levels, (string) $user['price_level_id'], ['empty' => 'Default']) ?>
-        </div>
+        <?= Form::select('status', 'Status', ['active' => 'Active', 'suspended' => 'Suspended', 'banned' => 'Banned'], $user['status']) ?>
+        <?= Form::select('price_level_id', 'Price level', $levels, (int) $user['price_level_manual'] === 1 ? (string) $user['price_level_id'] : '', ['empty' => 'Automatic (by deposits)']) ?>
         <?= Form::input('custom_discount', 'Custom discount %', $user['custom_discount'], ['type' => 'number', 'step' => '0.01', 'min' => 0, 'max' => 100, 'hint' => 'The larger of price-level and custom discount applies.']) ?>
         <?= Form::toggle('api_enabled', 'API access allowed', (int) $user['api_enabled'] === 1) ?>
         <?= Form::toggle('allow_negative', 'Allow negative balance (credit line)', (int) $user['allow_negative'] === 1) ?>

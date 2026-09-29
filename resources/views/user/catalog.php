@@ -13,7 +13,7 @@
 <?php if (!$grouped): ?><div class="card"><div class="empty"><?= icon('search') ?><h3>No services match</h3></div></div><?php endif ?>
 <?php foreach ($grouped as $g): ?>
 <div class="card mb-2">
-  <div class="card-header"><h2><?= e($g['name']) ?></h2></div>
+  <div class="card-header"><h2 class="heading-icon"><?= \App\Helpers\Platforms::icon(\App\Helpers\Platforms::detect($g['name'])) ?> <span><?= e($g['name']) ?></span></h2></div>
   <div class="table-wrap"><table class="table table-cards">
     <thead><tr><th>ID</th><th>Service</th><th class="num">Rate</th><th class="num">Min / Max</th><th></th></tr></thead>
     <tbody>

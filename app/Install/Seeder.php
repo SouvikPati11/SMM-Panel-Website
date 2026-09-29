@@ -66,8 +66,9 @@ final class Seeder
         }
 
         if (!(int) $db->fetchColumn('SELECT COUNT(*) FROM price_levels')) {
-            foreach ([['Standard', '0'], ['Reseller', '5'], ['VIP', '10']] as [$n, $d]) {
-                $db->insert('price_levels', ['name' => $n, 'discount_percent' => $d, 'created_at' => $now]);
+            // Automatic levels by lifetime credited deposits (admin can change thresholds).
+            foreach ([['Standard', '0', '0', 'Everyone starts here.'], ['Reseller', '5', '100', 'Unlocked after $100 of deposits.'], ['VIP', '10', '500', 'Unlocked after $500 of deposits.']] as [$n, $d, $min, $desc]) {
+                $db->insert('price_levels', ['name' => $n, 'description' => $desc, 'discount_percent' => $d, 'min_deposit' => $min, 'created_at' => $now]);
             }
         }
 

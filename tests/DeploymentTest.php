@@ -110,3 +110,14 @@ T::test('Deploy: bootstrap tolerates helpers already loaded by a Composer autolo
     T::eq(0, $exit, $out);
     T::eq('BOOTED', trim($out));
 });
+
+T::test('Deploy: every runtime file the app writes is gitignored (Git deploys never see local changes)', function () {
+    if (!is_dir(BASE_PATH . '/.git')) {
+        echo "    (skipped: not a git checkout)\n";
+        return;
+    }
+    foreach (['.env', 'storage/installed.lock', 'storage/cron-status.json', 'storage/cron-check.json', 'storage/cron-status.json.123.tmp', 'storage/logs/cron-2026-01-01.log', 'storage/sessions/sess_x', 'storage/cache/x', 'storage/uploads/proofs/x.png', 'public/uploads/qr/x.png', 'vendor/autoload.php'] as $path) {
+        exec('cd ' . escapeshellarg(BASE_PATH) . ' && git check-ignore -q ' . escapeshellarg($path), $out, $code);
+        T::eq(0, $code, "{$path} must be ignored by git");
+    }
+});

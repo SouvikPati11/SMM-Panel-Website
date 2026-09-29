@@ -97,27 +97,47 @@ final class WalletService
                 'created_at' => now(),
             ]);
 
+            if ($type === 'deposit' && $wallet === 'main') {
+                PriceLevelService::sync($userId); // same transaction: the level follows credited deposits only
+            }
             Logger::info('Wallet change', ['user' => $userId, 'type' => $type, 'amount' => $amount, 'ref' => $reference, 'after' => $after], 'payment');
             return ['transaction_id' => $txId, 'duplicate' => false, 'balance_after' => $after];
         });
     }
 
-    /** Admin balance adjustment — reason and admin id are mandatory. */
-    public static function adminAdjust(int $userId, string $amount, string $reason, int $adminId, string $kind = 'manual_adjustment'): array
+    /**
+     * Admin balance adjustment (add: positive, remove: negative). Reason and admin id
+     * are mandatory; the ledger row records before/after, the admin and the time,
+     * and the audit log records the same. $idempotencyKey (one per rendered form)
+     * makes a double-submitted form apply only once. Never below zero unless the
+     * wallet explicitly allows a negative balance.
+     */
+    public static function adminAdjust(int $userId, string $amount, string $reason, int $adminId, string $kind = 'manual_adjustment', ?string $idempotencyKey = null): array
     {
         $reason = trim($reason);
-        if ($reason === '') {
+        if (mb_strlen($reason) < 3) {
             throw new ValidationException('A reason is required for manual balance changes.');
         }
         if (!Money::isNumeric($amount) || Money::isZero($amount)) {
             throw new ValidationException('Enter a non-zero amount.');
         }
+        if (Money::cmp(Money::abs($amount), '1000000') > 0) {
+            throw new ValidationException('Amount is too large.');
+        }
         if (!in_array($kind, ['manual_adjustment', 'bonus', 'deposit'], true)) {
             $kind = 'manual_adjustment';
         }
-        $ref = 'admin:' . $adminId . ':' . bin2hex(random_bytes(8));
-        $res = self::apply($userId, $amount, $kind, $ref, 'Admin: ' . $reason, ['admin_id' => $adminId]);
-        AuditService::log('wallet.adjust', 'user', $userId, ['amount' => $amount, 'kind' => $kind, 'reason' => $reason, 'tx' => $res['transaction_id']]);
+        $ref = $idempotencyKey !== null && preg_match('/^[a-f0-9]{32}$/', $idempotencyKey)
+            ? 'admin-adjust:' . $idempotencyKey
+            : 'admin:' . $adminId . ':' . bin2hex(random_bytes(8));
+        $res = self::apply($userId, $amount, $kind, $ref, 'Admin: ' . mb_substr($reason, 0, 240), ['admin_id' => $adminId]);
+        if (!$res['duplicate']) {
+            $tx = Database::instance()->fetch('SELECT balance_before, balance_after FROM transactions WHERE id = ?', [$res['transaction_id']]);
+            AuditService::log('wallet.adjust', 'user', $userId, [
+                'amount' => Money::of($amount), 'kind' => $kind, 'reason' => $reason, 'tx' => $res['transaction_id'],
+                'balance_before' => $tx['balance_before'] ?? null, 'balance_after' => $tx['balance_after'] ?? null,
+            ]);
+        }
         return $res;
     }
 

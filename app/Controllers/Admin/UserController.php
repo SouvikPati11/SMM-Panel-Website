@@ -84,10 +84,12 @@ final class UserController extends Controller
                 'password_hash' => password_hash($data['password'], PASSWORD_DEFAULT),
                 'status' => 'active', 'email_verified_at' => now(),
                 'price_level_id' => $request->int('price_level_id') ?: null,
+                'price_level_manual' => $request->int('price_level_id') ? 1 : 0,
                 'referral_code' => strtolower(bin2hex(random_bytes(5))),
                 'created_at' => now(), 'updated_at' => now(),
             ]);
             WalletService::createWallet($id);
+            \App\Services\PriceLevelService::sync($id);
             return $id;
         });
         AuditService::log('user.create', 'user', $id, ['username' => $data['username']]);
@@ -102,11 +104,12 @@ final class UserController extends Controller
         if (!$user) {
             $this->notFound();
         }
-        $tab = in_array($request->str('tab'), ['orders', 'transactions', 'tickets', 'payments', 'activity'], true) ? $request->str('tab') : 'orders';
+        $tab = in_array($request->str('tab'), ['orders', 'transactions', 'adjustments', 'tickets', 'payments', 'activity'], true) ? $request->str('tab') : 'orders';
         $page = $this->pageNum($request);
         $list = match ($tab) {
             'orders' => Paginator::query('o.id, o.link, o.quantity, o.charge, o.status, o.created_at, s.name AS service', 'FROM orders o JOIN services s ON s.id = o.service_id WHERE o.user_id = ?', [$id], 'o.id DESC', $page, 20),
             'transactions' => Paginator::query('*', 'FROM transactions WHERE user_id = ?', [$id], 'id DESC', $page, 25),
+            'adjustments' => Paginator::query('t.*, a.username AS admin_name', 'FROM transactions t LEFT JOIN admins a ON a.id = t.admin_id WHERE t.user_id = ? AND t.admin_id IS NOT NULL', [$id], 't.id DESC', $page, 25),
             'tickets' => Paginator::query('*', 'FROM tickets WHERE user_id = ?', [$id], 'id DESC', $page, 20),
             'payments' => Paginator::query('*', 'FROM payments WHERE user_id = ?', [$id], 'id DESC', $page, 20),
             'activity' => Paginator::query('*', "FROM login_attempts WHERE guard = 'user' AND identifier IN (?, ?)", [strtolower($user['username']), $user['email']], 'id DESC', $page, 25),
@@ -117,6 +120,8 @@ final class UserController extends Controller
             'tab' => $tab,
             'list' => $list,
             'levels' => $this->levels(),
+            'levelInfo' => \App\Services\PriceLevelService::progress($user),
+            'adjustKey' => bin2hex(random_bytes(16)),
             'orderStats' => \App\Services\OrderService::userStats($id),
             'apiKey' => ApiKeyService::active($id),
             'referrals' => (int) $db->fetchColumn('SELECT COUNT(*) FROM referrals WHERE referrer_id = ?', [$id]),
@@ -139,12 +144,13 @@ final class UserController extends Controller
         if ($db->fetchColumn('SELECT id FROM users WHERE email = ? AND id <> ?', [$email, $id])) {
             throw new ValidationException('Email already used by another account.');
         }
-        $level = $request->int('price_level_id');
+        $level = $request->int('price_level_id'); // 0 = automatic by deposits
         $changes = [
             'name' => mb_substr($request->str('name'), 0, 100) ?: null,
             'email' => $email,
             'status' => $data['status'],
-            'price_level_id' => $level ?: null,
+            'price_level_id' => $level ?: $user['price_level_id'],
+            'price_level_manual' => $level ? 1 : 0,
             'custom_discount' => Money::of($data['custom_discount'] ?: '0', 2),
             'api_enabled' => $request->bool('api_enabled') ? 1 : 0,
             'admin_note' => mb_substr($request->str('admin_note'), 0, 2000) ?: null,
@@ -154,6 +160,9 @@ final class UserController extends Controller
             $db->query('UPDATE users SET session_version = session_version + 1 WHERE id = ?', [$id]); // force logout
         }
         $db->update('users', $changes, ['id' => $id]);
+        if (!$level) {
+            \App\Services\PriceLevelService::sync($id);
+        }
         $db->update('wallets', ['allow_negative' => $request->bool('allow_negative') ? 1 : 0], ['user_id' => $id]);
         $diff = [];
         foreach ($changes as $k => $v) {
@@ -173,9 +182,12 @@ final class UserController extends Controller
         if (!Money::isNumeric($amount) || !Money::isPositive($amount)) {
             throw new ValidationException('Enter a positive amount.');
         }
-        $res = WalletService::adminAdjust($id, $direction . $amount, $request->str('reason'), (int) $this->admin()['id'], $request->str('kind') ?: 'manual_adjustment');
-        $this->success('Balance updated. New balance: ' . money($res['balance_after']));
-        return Response::redirect(admin_url('users/' . $id . '?tab=transactions'));
+        if (!Database::instance()->fetchColumn('SELECT id FROM users WHERE id = ? AND deleted_at IS NULL', [$id])) {
+            $this->notFound();
+        }
+        $res = WalletService::adminAdjust($id, $direction . $amount, $request->str('reason'), (int) $this->admin()['id'], $request->str('kind') ?: 'manual_adjustment', $request->str('adjust_key') ?: null);
+        $res['duplicate'] ? $this->success('This adjustment was already applied (form submitted twice). Balance: ' . money($res['balance_after'])) : $this->success('Balance updated. New balance: ' . money($res['balance_after']));
+        return Response::redirect(admin_url('users/' . $id . '?tab=adjustments'));
     }
 
     public function security(Request $request, int $id): Response

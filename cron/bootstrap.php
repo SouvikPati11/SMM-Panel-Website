@@ -83,6 +83,7 @@ function smm_cron_finish($code, $error, $summary)
     exit((int) $code);
 }
 
+$GLOBALS['smm_cron_user'] = function_exists('posix_geteuid') && function_exists('posix_getpwuid') ? (string) (posix_getpwuid(posix_geteuid())['name'] ?? '') : (string) get_current_user();
 smm_cron_status(array(
     'invoked_at' => gmdate('Y-m-d H:i:s'),
     'finished_at' => null,
@@ -95,7 +96,7 @@ smm_cron_status(array(
     'script' => isset($_SERVER['SCRIPT_FILENAME']) ? basename((string) $_SERVER['SCRIPT_FILENAME']) : 'run.php',
     'cwd' => $GLOBALS['smm_cron_cwd'],
     'pid' => getmypid(),
-    'user' => function_exists('posix_geteuid') && function_exists('posix_getpwuid') ? (string) (posix_getpwuid(posix_geteuid())['name'] ?? '') : (string) get_current_user(),
+    'user' => $GLOBALS['smm_cron_user'],
 ));
 if (!is_writable($GLOBALS['smm_cron_base'] . '/storage')) {
     fwrite(STDERR, 'cron WARNING: ' . $GLOBALS['smm_cron_base'] . '/storage is not writable by this user; logs and diagnostics cannot be saved.' . PHP_EOL);
@@ -114,6 +115,10 @@ require $GLOBALS['smm_cron_base'] . '/app/bootstrap.php';
 
 if (!App\Core\App::isInstalled()) {
     smm_cron_finish(2, 'Not installed yet (storage/installed.lock is missing). Complete /install first.', null);
+}
+// Without this the database error reads "Access denied for user ''", which hides the cause.
+if (is_file($GLOBALS['smm_cron_base'] . '/.env') && !is_readable($GLOBALS['smm_cron_base'] . '/.env')) {
+    smm_cron_finish(2, $GLOBALS['smm_cron_base'] . '/.env exists but is not readable by the user cron runs as (' . $GLOBALS['smm_cron_user'] . '). Run the cron job as the account that owns the website files, or make .env readable by that user.', null);
 }
 try {
     App\Core\Database::instance()->fetchColumn('SELECT 1');

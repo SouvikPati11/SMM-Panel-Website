@@ -70,7 +70,7 @@ rather than discarding output.
 |---|---|
 | 0 | all due tasks succeeded (or none were due; tasks locked by another run are skipped) |
 | 1 | at least one task failed; see the error line and Admin → Cron tasks |
-| 2 | environment/configuration problem: PHP older than 8.1, missing extensions, not installed |
+| 2 | environment/configuration problem: PHP older than 8.1, missing extensions, not installed, `.env` not readable by the user cron runs as (run cron as the account that owns the site files) |
 | 3 | database unavailable (credentials in `.env`, MySQL down) |
 
 ## Diagnostics — verify cron after deployment

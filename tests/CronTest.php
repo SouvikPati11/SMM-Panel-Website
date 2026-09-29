@@ -137,6 +137,27 @@ T::test('Cron: a PHP binary missing required extensions fails with exit code 2 a
     T::true(str_contains((string) $recorded['last_error'], 'missing required extensions'));
 });
 
+T::test('Cron: run as a user that cannot read .env fails with exit code 2 naming the cause (not "Access denied for user \'\'")', function () {
+    $root = function_exists('posix_geteuid') && posix_geteuid() === 0;
+    if ($root && !is_executable('/usr/sbin/runuser') && !is_executable('/sbin/runuser')) {
+        echo "    (skipped: running as root without runuser)\n";
+        return;
+    }
+    $dir = sys_get_temp_dir() . '/smm-cron-env-' . bin2hex(random_bytes(4));
+    exec('mkdir -p ' . escapeshellarg($dir . '/storage/logs') . ' && cp -r ' . escapeshellarg(BASE_PATH . '/app') . ' ' . escapeshellarg(BASE_PATH . '/cron') . ' ' . escapeshellarg(BASE_PATH . '/config') . ' ' . escapeshellarg($dir) . ' && chmod -R a+rX ' . escapeshellarg($dir) . ' && chmod -R a+rwx ' . escapeshellarg($dir . '/storage'));
+    file_put_contents($dir . '/storage/installed.lock', 'test');
+    file_put_contents($dir . '/.env', "DB_USER=smm\n");
+    chmod($dir . '/.env', 0);
+    $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($dir . '/cron/run.php');
+    exec('cd / && ' . ($root ? 'runuser -u nobody -- ' . $cmd : $cmd) . ' 2>&1', $out, $code);
+    $recorded = json_decode((string) @file_get_contents($dir . '/storage/cron-status.json'), true);
+    exec('rm -rf ' . escapeshellarg($dir));
+    $out = implode("\n", $out);
+    T::eq(2, $code, $out);
+    T::true(str_contains($out, '.env exists but is not readable by the user cron runs as'), $out);
+    T::eq(2, $recorded['exit_code'] ?? null, 'recorded for Admin → Cron');
+});
+
 T::test('Cron: admin diagnostics explain never-run, stale, failing and non-CLI cron', function () {
     $tasks = CronService::status();
     $texts = static fn (array $p) => implode(' | ', array_column($p, 'text'));

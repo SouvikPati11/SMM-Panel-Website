@@ -33,42 +33,33 @@ final class PaymentController extends Controller
             $where .= ' AND p.gateway = ?';
             $params[] = $gw;
         }
+        if ($request->str('review') === '1') {
+            $where .= ' AND p.needs_review = 1';
+        }
         $q = mb_substr($request->str('q'), 0, 128);
         if ($q !== '') {
-            $where .= ' AND (p.id = ? OR p.gateway_ref = ? OR u.username LIKE ?)';
-            array_push($params, ctype_digit($q) ? (int) $q : 0, $q, Database::like($q));
+            $where .= ' AND (p.id = ? OR p.gateway_ref = ? OR p.merchant_order_id = ? OR p.utr = ? OR u.username LIKE ?)';
+            array_push($params, ctype_digit($q) ? (int) $q : 0, $q, $q, $q, Database::like($q));
         }
         $payments = Paginator::query('p.*, u.username, pm.name AS method', "FROM payments p JOIN users u ON u.id = p.user_id LEFT JOIN payment_methods pm ON pm.id = p.payment_method_id {$where}", $params, 'p.id DESC', $this->pageNum($request), 40);
         $sum = Database::instance()->fetch("SELECT COALESCE(SUM(amount),0) total, COUNT(*) n FROM payments WHERE status = 'completed' AND completed_at >= ?", [gmdate('Y-m-d H:i:s', time() - 30 * 86400)]);
-        return $this->view('admin/payments/index', ['title' => 'Payments', 'payments' => $payments, 'status' => $status, 'gateway' => $gw, 'q' => $q, 'sum' => $sum]);
+        $review = (int) Database::instance()->fetchColumn('SELECT COUNT(*) FROM payments WHERE needs_review = 1 AND status = ?', ['pending']);
+        return $this->view('admin/payments/index', ['title' => 'Payments', 'payments' => $payments, 'status' => $status, 'gateway' => $gw, 'q' => $q, 'sum' => $sum, 'reviewCount' => $review, 'reviewOnly' => $request->str('review') === '1']);
     }
 
-    /** Manually re-query the gateway for a pending payment (never trusts anything but the gateway API). */
+    /** Re-query the gateway for a pending payment (never trusts anything but the gateway API). */
     public function verify(Request $request, int $id): Response
     {
-        $db = Database::instance();
-        $p = $db->fetch('SELECT * FROM payments WHERE id = ?', [$id]);
+        $p = Database::instance()->fetch('SELECT * FROM payments WHERE id = ?', [$id]);
         if (!$p || !GatewayRegistry::isAutomatic($p['gateway'])) {
             throw new ValidationException('Only automatic gateway payments can be verified.');
         }
-        $method = $db->fetch('SELECT * FROM payment_methods WHERE id = ?', [$p['payment_method_id']]);
-        $r = GatewayRegistry::make($method)->verifyPayment($p);
-        if (!$r->valid) {
-            throw new ValidationException('Gateway query failed: ' . $r->error);
+        if ($p['status'] !== 'pending') {
+            throw new ValidationException('Only pending payments can be verified (this one is ' . $p['status'] . ').');
         }
-        if ($r->status === 'completed') {
-            if ($m = PaymentService::amountMismatch($p, $r)) {
-                throw new ValidationException('Paid, but amount/currency differs (' . $m . '). Credit manually via the user\'s balance if appropriate.');
-            }
-            $did = PaymentService::complete($id, 'admin-verify:' . $this->admin()['id'], ['gateway_status' => $r->gatewayStatus]);
-            $this->success($did ? 'Gateway confirms payment — balance credited.' : 'Already credited.');
-        } else {
-            if (in_array($r->status, ['failed', 'expired', 'cancelled'], true)) {
-                PaymentService::markFinal($id, $r->status, $r->gatewayStatus);
-            }
-            $this->success('Gateway status: ' . ($r->gatewayStatus ?: $r->status) . '. Nothing credited.');
-        }
-        AuditService::log('payment.verify', 'payment', $id, ['result' => $r->status]);
+        $res = PaymentService::verifyOne($id, 'admin-verify:' . $this->admin()['id']);
+        AuditService::log('payment.verify', 'payment', $id, ['result' => $res]);
+        $this->success('Gateway check: ' . ($res ?? 'nothing to verify') . '.');
         return Response::redirect(admin_url('payments'));
     }
 

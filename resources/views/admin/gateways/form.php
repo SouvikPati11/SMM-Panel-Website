@@ -41,7 +41,9 @@
       <?php endforeach ?>
     </div></div>
     <?php endif ?>
-    <div class="card mb-2"><div class="card-body text-sm">Webhook / callback URL:<div class="copy-box mt-1"><span><?= e(url('/webhooks/' . $m['gateway'])) ?></span><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e(url('/webhooks/' . $m['gateway'])) ?>"><?= icon('copy') ?></button></div></div></div>
+    <?php if (!$gateway->callbacksAreSigned()): ?><div class="alert alert-info"><?= icon('shield') ?><div>This gateway's callbacks are not signed (no signature is documented). Callbacks are only used as a trigger: every payment is confirmed with the gateway's status API, and the amount must match exactly, before anything is credited.</div></div><?php endif ?>
+    <?php if (!str_starts_with(url('/'), 'https://')): ?><div class="alert alert-warning"><?= icon('alert') ?><div>Your APP_URL is not HTTPS. Gateways require an HTTPS webhook URL in production.</div></div><?php endif ?>
+    <div class="card mb-2"><div class="card-body text-sm">Webhook / callback URL<?= $m['gateway'] === 'p2gateway' ? ' — paste into <strong>P2Gateway Merchant Dashboard → Webhook URL</strong>' : '' ?>:<div class="copy-box mt-1"><span><?= e(url('/webhooks/' . $m['gateway'])) ?></span><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e(url('/webhooks/' . $m['gateway'])) ?>"><?= icon('copy') ?></button></div></div></div>
     <?php endif ?>
     <button class="btn btn-primary btn-lg btn-block" type="submit">Save</button>
   </div>

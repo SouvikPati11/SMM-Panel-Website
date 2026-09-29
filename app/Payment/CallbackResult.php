@@ -17,6 +17,8 @@ final class CallbackResult
         public readonly ?string $orderId = null,
         public readonly string $error = '',
         public readonly array $raw = [],
+        /** bank/UPI transaction reference when the gateway provides one */
+        public readonly ?string $utr = null,
     ) {
     }
 

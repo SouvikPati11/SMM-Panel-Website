@@ -26,7 +26,7 @@ partial refunds), speed of the order form on mobile, and a trustworthy wallet.
 | Provider API | De-facto "API v2": single URL, form-encoded POST, `key` + `action` (`services`, `add`, `status`, `refill`, `refill_status`, `cancel`, `balance`), JSON responses | Generic adapter implementing exactly this, with a per-provider **parameter/action map** for panels that deviate |
 | Reseller API | Panels expose the *same* v2 format so resellers can chain panels | `/api/v2` implementing the same contract |
 | Wallet | Prepaid balance, every change is a ledger line | `wallets` + immutable `transactions` ledger with before/after balance |
-| Payments | Crypto processors + local methods + manual (UPI/bank) with proof | OxaPay, Cryptomus, P2Gateway (placeholder), Manual |
+| Payments | Crypto processors + local methods + manual (UPI/bank) with proof | OxaPay, Cryptomus, P2Gateway (UPI), Manual |
 | Support | Ticket categories (Order, Payment, API, Other), order ID field | Same, with attachments, priority, assignment |
 | Affiliates | % of referred users' deposits, payout threshold | Same, commission credited in the same DB transaction as the deposit |
 | Growth | Coupons that add bonus on deposit, announcements, blog for SEO | Same |
@@ -64,11 +64,10 @@ excerpts of the official docs.
   `system_fail`, `refund_*`, plus intermediate (`process`, `check`, `confirm_check`).
   `is_final` marks terminal states.
 
-**P2Gateway.in** — **no public API documentation could be located** (the site was not
-reachable and no indexed developer docs exist). Per the project rules the adapter is
-an **isolated, disabled placeholder** (`app/Payment/Gateways/P2GatewayGateway.php`)
-that refuses to create payments. `docs/payment-gateways.md` lists the exact
-information required to complete it.
+**P2Gateway.in** — implemented from the merchant API documentation supplied by the
+site owner. It uses `POST /api/create-order` and `POST /api/check-order-status`
+(form-encoded, `user_token`). The webhook payload and signature are undocumented,
+so callbacks only trigger a status-API check. Details are in `docs/payment-gateways.md`.
 
 **Manual** — fully internal: admin-defined methods (UPI/bank/crypto address) with QR
 image, min/max; users submit reference + optional proof; admin approves/rejects.

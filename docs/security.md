@@ -36,7 +36,7 @@ deploying. Every control listed under "Implemented" is covered by
 - Balances change only through `WalletService::apply()`: row lock (`SELECT … FOR UPDATE`), ledger row with before/after balance, unique idempotency reference, negative-balance guard. Verified with a multi-process race test.
 - Decimal arithmetic without floats (`App\Core\Money`, bcmath or exact pure-PHP fallback); `DECIMAL` columns.
 - Orders: idempotency key per form, atomic submission claim, no blind retries of non-idempotent provider calls, refunds unique per order and kind.
-- Payments: signature verification, server-to-server status confirmation, amount/currency check, idempotent completion, unique `(gateway, gateway_ref)`, browser redirects never credit, gateway payment URL must be `https://`.
+- Payments: signature verification, server-to-server status confirmation, amount/currency check, idempotent completion, unique `(gateway, gateway_ref)`, browser redirects never credit, gateway payment URL must be `https://`. Unsigned callbacks (P2Gateway) are treated as notifications only: their content is ignored except the order reference, and state and amount come from the gateway's status API. P2Gateway amounts must match exactly, otherwise the payment is held for admin review. Merchant order ids are unique and never reused, and a rejected order's reference is detached. Gateway tokens are encrypted at rest, masked in the admin UI and redacted from every log, including echoed callback payloads (`tests/P2GatewayTest.php`).
 - Manual payments: unique reference per method, one-time approval under row lock, admin-only proof viewing.
 - Coupons & referrals: usage limits enforced under row lock at credit time; unique per payment; self-referral and same-IP referrals blocked.
 
@@ -71,7 +71,7 @@ deploying. Every control listed under "Implemented" is covered by
 - [ ] `storage/` and `public/uploads/` writable by PHP; nothing else writable. Suggested: files 644, directories 755, `.env` 640.
 - [ ] Cron running (dashboard shows no "cron" banner).
 - [ ] SMTP configured and test email received (password resets depend on it).
-- [ ] Payment gateway webhooks point to your HTTPS domain; test one small real payment.
+- [ ] Payment gateway webhooks point to your HTTPS domain (P2Gateway: set it in the Merchant Dashboard); test one small real payment per gateway.
 - [ ] If behind Cloudflare/another proxy, set `TRUSTED_PROXIES` so rate limits and logs see real client IPs.
 - [ ] Database user has privileges only on this database.
 - [ ] Regular backups of the database **and** `.env`.

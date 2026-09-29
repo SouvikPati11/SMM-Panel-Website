@@ -53,6 +53,55 @@ abstract class AbstractGateway implements PaymentGatewayInterface
         return $this->options[$name] ?? $default;
     }
 
+    /**
+     * true when the gateway authenticates its callbacks (signature/HMAC).
+     * false = callback content is untrusted: PaymentService ignores the claimed
+     * status and always settles from a server-side verifyPayment() query.
+     */
+    public function callbacksAreSigned(): bool
+    {
+        return true;
+    }
+
+    /** true = the verified paid amount must equal the expected amount exactly. */
+    public function requiresExactAmount(): bool
+    {
+        return false;
+    }
+
+    /** Merchant-side order reference sent to the gateway (stored in payments.merchant_order_id). */
+    public function merchantOrderId(array $payment): string
+    {
+        return 'PAY-' . $payment['id'];
+    }
+
+    /** Minutes after which the gateway itself fails the order (null = use site setting). */
+    public function orderTimeoutMinutes(): ?int
+    {
+        return null;
+    }
+
+    /** Whether this gateway can be offered for the site currency. */
+    public function supportsCurrency(string $currency): bool
+    {
+        return true;
+    }
+
+    /** Extra fields the customer must fill on the Add Funds form: list<array{name,label,type,pattern,hint}> */
+    public function paymentFields(): array
+    {
+        return [];
+    }
+
+    /**
+     * Validate customer-entered paymentFields(); returns cleaned values stored
+     * in payments.meta. Throw ValidationException with a user-safe message.
+     */
+    public function validatePaymentFields(array $input): array
+    {
+        return [];
+    }
+
     /** Amount the customer must pay (credit amount + fee) as a plain decimal string. */
     protected function chargeAmount(array $payment): string
     {

@@ -35,6 +35,8 @@ final class Seeder
         'system.manage' => ['System', 'System health and cron tasks'],
     ];
 
+    public const P2GATEWAY_INSTRUCTIONS = "Pay instantly with any UPI app. You will be redirected to the secure P2Gateway payment page; your balance is credited automatically once the payment is verified. Payment links expire after 30 minutes.";
+
     public static function run(): void
     {
         $db = Database::instance();
@@ -85,7 +87,7 @@ final class Seeder
         $methods = [
             ['oxapay', 'Crypto (OxaPay)', 'Pay with USDT, BTC, ETH, TRX and 20+ cryptocurrencies. Your balance is credited automatically after network confirmation.'],
             ['cryptomus', 'Crypto (Cryptomus)', 'Pay with popular cryptocurrencies via Cryptomus. Credited automatically after confirmation.'],
-            ['p2gateway', 'UPI / Cards (P2Gateway)', 'Placeholder — requires implementation from official P2Gateway.in API documentation.'],
+            ['p2gateway', 'UPI (P2Gateway)', self::P2GATEWAY_INSTRUCTIONS],
         ];
         foreach ($methods as $i => [$gw, $name, $instr]) {
             if (!$db->fetchColumn('SELECT id FROM payment_methods WHERE gateway = ?', [$gw])) {

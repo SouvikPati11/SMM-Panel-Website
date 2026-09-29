@@ -140,6 +140,7 @@ $router->group(['prefix' => $prefix, 'middleware' => ['csrf']], static function 
         $router->post('/roles/{id}/delete', [Admin\AdminController::class, 'deleteRole'], 'admin.roles.delete', ['perm:admins.manage']);
         $router->get('/logs', [Admin\SystemController::class, 'logs'], 'admin.logs', ['perm:logs.view']);
         $router->get('/health', [Admin\SystemController::class, 'health'], 'admin.health', ['perm:system.manage']);
+        $router->post('/health/migrate', [Admin\SystemController::class, 'migrate'], 'admin.health.migrate', ['perm:system.manage']);
         $router->get('/cron', [Admin\SystemController::class, 'cron'], 'admin.cron', ['perm:system.manage']);
         $router->post('/cron/{task}/run', [Admin\SystemController::class, 'runCron'], 'admin.cron.run', ['perm:system.manage']);
     });

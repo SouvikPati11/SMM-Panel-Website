@@ -418,11 +418,15 @@ CREATE TABLE IF NOT EXISTS payments (
   fee               DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
   currency          CHAR(3) NOT NULL,
   gateway_ref       VARCHAR(128) NULL,
+  merchant_order_id VARCHAR(64) NULL,
   status            ENUM('pending','completed','failed','expired','cancelled') NOT NULL DEFAULT 'pending',
   gateway_status    VARCHAR(40) NULL,
   pay_url           VARCHAR(1000) NULL,
   coupon_id         INT UNSIGNED NULL,
   bonus_amount      DECIMAL(18,4) NOT NULL DEFAULT 0.0000,
+  verified_amount   DECIMAL(18,4) NULL,
+  utr               VARCHAR(100) NULL,
+  needs_review      TINYINT(1) NOT NULL DEFAULT 0,
   meta              TEXT NULL,
   ip                VARCHAR(45) NULL,
   expires_at        DATETIME NULL,
@@ -431,6 +435,7 @@ CREATE TABLE IF NOT EXISTS payments (
   updated_at        DATETIME NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_pay_gateway_ref (gateway, gateway_ref),
+  UNIQUE KEY uq_pay_merchant_order (merchant_order_id),
   KEY idx_pay_user (user_id, created_at),
   KEY idx_pay_status (status, expires_at),
   KEY idx_pay_created (created_at),
@@ -777,6 +782,12 @@ CREATE TABLE IF NOT EXISTS cron_runs (
   finished_at  DATETIME NULL,
   PRIMARY KEY (id),
   KEY idx_cron_task (task, started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version     VARCHAR(100) NOT NULL,
+  applied_at  DATETIME NOT NULL,
+  PRIMARY KEY (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

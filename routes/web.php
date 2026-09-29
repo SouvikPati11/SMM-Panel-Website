@@ -11,7 +11,9 @@ use App\Controllers\Webhook\WebhookController;
 // ------------------------------------------------------------------ stateless endpoints
 $router->get('/sitemap.xml', [PageController::class, 'sitemap'], 'sitemap', ['stateless']);
 $router->get('/robots.txt', [PageController::class, 'robots'], 'robots', ['stateless']);
-$router->post('/webhooks/{gateway}', [WebhookController::class, 'handle'], 'webhook', ['stateless']);
+// GET is accepted too: P2Gateway's callback method is undocumented. Callbacks are
+// never trusted on their own (signature and/or server-side status check).
+$router->any('/webhooks/{gateway}', [WebhookController::class, 'handle'], 'webhook', ['stateless']);
 $router->get('/tasks/run/{token}', [App\Controllers\Public\CronController::class, 'run'], 'cron.http', ['stateless']);
 
 // ------------------------------------------------------------------ public website

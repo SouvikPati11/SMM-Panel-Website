@@ -184,6 +184,7 @@ final class Installer
         Database::setInstance($conn);
         $conn->pdo()->exec((string) file_get_contents(BASE_PATH . '/database/schema.sql'));
         Seeder::run();
+        Migrator::markAllApplied();
         SettingsService::flush();
         SettingsService::set('site_name', $data['site_name']);
         SettingsService::set('admin_notify_email', $data['admin_email']);

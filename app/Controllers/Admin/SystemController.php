@@ -13,6 +13,7 @@ use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Response;
 use App\Install\Installer;
+use App\Install\Migrator;
 use App\Services\AuditService;
 use App\Services\CronService;
 
@@ -67,6 +68,8 @@ final class SystemController extends Controller
         $checks[] = ['.env not web-readable', !is_file(PUBLIC_PATH . '/.env'), '.env must live outside /public.', true];
         $superWith2fa = (int) $db->fetchColumn("SELECT COUNT(*) FROM admins WHERE status = 'active' AND twofa_enabled = 0");
         $checks[] = ['All admins use 2FA', $superWith2fa === 0, $superWith2fa . ' active admin(s) without 2FA.', false];
+        $pending = Migrator::pending();
+        $checks[] = ['Database schema up to date', $pending === [], 'Pending upgrades: ' . implode(', ', $pending) . ' — use "Apply database upgrades" below or run php database/migrate.php.', true];
 
         $info = [
             'PHP' => PHP_VERSION . ' (' . PHP_SAPI . ')',
@@ -89,7 +92,15 @@ final class SystemController extends Controller
             'Provider errors (24h)' => (int) $db->fetchColumn('SELECT COUNT(*) FROM provider_logs WHERE success = 0 AND created_at > ?', [gmdate('Y-m-d H:i:s', time() - 86400)]),
             'Rejected webhooks (24h)' => (int) $db->fetchColumn('SELECT COUNT(*) FROM webhook_logs WHERE signature_valid = 0 AND created_at > ?', [gmdate('Y-m-d H:i:s', time() - 86400)]),
         ];
-        return $this->view('admin/system/health', ['title' => 'System health', 'checks' => $checks, 'info' => $info, 'counts' => $counts, 'cron' => CronService::status()]);
+        return $this->view('admin/system/health', ['title' => 'System health', 'checks' => $checks, 'info' => $info, 'counts' => $counts, 'cron' => CronService::status(), 'pendingMigrations' => $pending]);
+    }
+
+    public function migrate(Request $request): Response
+    {
+        $applied = Migrator::run();
+        AuditService::log('system.migrate', 'system', null, ['applied' => $applied]);
+        $this->success($applied ? 'Applied: ' . implode(', ', $applied) . '.' : 'Database schema is already up to date.');
+        return Response::redirect(admin_url('health'));
     }
 
     public function cron(Request $request): Response

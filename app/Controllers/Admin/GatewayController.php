@@ -25,10 +25,12 @@ final class GatewayController extends Controller
         foreach ($methods as &$m) {
             $m['implemented'] = true;
             $m['configured'] = true;
+            $m['currency_ok'] = true;
             if (GatewayRegistry::isAutomatic($m['gateway'])) {
                 $gw = GatewayRegistry::make($m);
                 $m['implemented'] = $gw->isImplemented();
                 $m['configured'] = $gw->isConfigured();
+                $m['currency_ok'] = $gw->supportsCurrency((string) setting('currency_code', 'USD'));
             }
         }
         return $this->view('admin/gateways/index', ['title' => 'Payment gateways', 'methods' => $methods]);
@@ -127,7 +129,9 @@ final class GatewayController extends Controller
                     $this->error('This gateway is a placeholder and cannot be enabled until it is implemented (see docs/payment-gateways.md).');
                 } elseif (!$check->isConfigured()) {
                     $row['status'] = 'disabled';
-                    $this->error('Enter all required credentials before enabling this gateway.');
+                    $this->error('Enter all required credentials (and HTTPS endpoint URLs) before enabling this gateway.');
+                } elseif (!$check->supportsCurrency((string) setting('currency_code', 'USD'))) {
+                    $this->error('Saved, but this gateway will not be offered: its account currency does not match the site currency (' . setting('currency_code', 'USD') . ').');
                 }
             }
             AuditService::log('gateway.credentials', 'payment_method', $id, ['changed' => $changed]);

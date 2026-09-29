@@ -9,19 +9,23 @@ address…) are unlimited and fully configurable.
 ```
 User clicks "Continue to payment"
   → server validates amount limits + promo code, creates `payments` row (pending)
-  → server creates the invoice at the gateway, stores its reference, redirects the browser
-Gateway calls POST /webhooks/{gateway}
-  → raw request stored in webhook_logs
-  → signature verified (reject → HTTP 401)
-  → payment located by gateway reference, order_id cross-checked ("PAY-{id}")
-  → if "paid": server re-queries the gateway API; credits only if the API agrees
-    AND currency matches AND paid amount ≥ expected amount
+  → server stores a unique merchant order id (payments.merchant_order_id)
+  → server creates the invoice at the gateway, stores its reference (gateway_ref), redirects the browser
+Gateway calls /webhooks/{gateway}
+  → raw request stored in webhook_logs (tokens/keys masked)
+  → signed gateways (OxaPay, Cryptomus): signature verified (reject → HTTP 401)
+    unsigned gateways (P2Gateway): payload content ignored except the order reference
+  → payment located by gateway_ref / merchant_order_id
+  → server queries the gateway's status API; PaymentService::settle():
+      reference matches? → status completed? → amount OK? → complete()
   → PaymentService::complete(): row lock + idempotent ledger entry "payment:{id}"
 Cron `payments` every 5 min re-checks pending invoices (missed webhooks) and expires old ones.
+The return page and Admin → Payments → Verify use the same server-side check.
 ```
 
 Guarantees:
-- The browser return URL (`/funds/return/{id}`) **never** credits anything; it only displays status.
+- The browser return URL (`/funds/return/{id}`) **never** credits from browser data. It may trigger the same server-to-server status query (throttled to once per 15 s per payment); only the gateway's answer counts.
+- Every payment stores: requested amount (+fee), local payment id, merchant order id, gateway order id, status, verified amount and UTR/transaction reference (where the gateway provides one).
 - The amount credited is the amount stored when the invoice was created — never a value from the callback or the browser.
 - Duplicate or replayed callbacks are no-ops (`status = completed` check under `SELECT … FOR UPDATE` + unique ledger reference).
 - Amount/currency mismatches are held (not credited) and flagged in Admin → Payments with an email alert.
@@ -98,38 +102,95 @@ Setup:
 
 ---
 
-## P2Gateway.in — placeholder (NOT implemented)
+## P2Gateway.in (UPI)
 
-Implementation: `app/Payment/Gateways/P2GatewayGateway.php`
+Implementation: `app/Payment/Gateways/P2GatewayGateway.php` ·
+Tests: `tests/P2GatewayTest.php` (23 tests)
 
-During development **no official public API documentation for P2Gateway.in
-could be obtained** (the site was unreachable from the build environment and no
-developer docs are indexed). Following the rule "never invent endpoints,
-parameters, authentication or signature algorithms", the adapter is an isolated
-placeholder:
+**Source:** the P2Gateway Merchant API documentation from the merchant dashboard,
+supplied by the site owner. Only what is documented there is used:
 
-- `isImplemented()` returns `false`, so the method is never offered to users and cannot be enabled;
-- credentials can already be stored (encrypted);
-- any webhook to `/webhooks/p2gateway` is logged and ignored — it can never credit a wallet.
+| Item | Documented value |
+|---|---|
+| Auth | API token from the Merchant Dashboard, sent as form field `user_token` |
+| Create order | `POST https://p2gateway.in/api/create-order`, `application/x-www-form-urlencoded`: `customer_mobile`, `user_token`, `amount`, `order_id`, `redirect_url`, `remark1` |
+| Create response (ok) | `{"status":true,"message":"Order Created Successfully","result":{"orderId":"…","payment_url":"…"}}` |
+| Create response (error) | `{"status":false,"message":"order_id already exists"}` |
+| Order timeout | 30 minutes, then the order is failed automatically |
+| Check status | `POST https://p2gateway.in/api/check-order-status` (form): `user_token`, `order_id` |
+| Status response | `{"txnStatus":"COMPLETED","resultInfo":"Transaction Success","orderId":"…","status":"SUCCESS","amount":"…","date":"…","utr":"…"}` |
+| Webhook | Configurable **Webhook URL** in the Merchant Dashboard; payload format and signature are **not documented** |
 
-### What is needed to complete it
+### How it is used
 
-Request from P2Gateway.in (merchant support / developer portal):
+- **Order IDs**: each payment gets a new, never-reused merchant `order_id`
+  (`SMM{paymentId}T{8 random hex}`, unique index). Stored chain:
+  `payments.id` → `payments.merchant_order_id` (sent as `order_id`) →
+  `payments.gateway_ref` (P2Gateway `result.orderId`).
+- **customer_mobile**: asked on the Add Funds form (10-digit Indian mobile;
+  `+91`/`0` prefixes normalised), stored in the payment's meta, and prefilled
+  next time.
+- **amount**: the server-side amount + fee, never a browser value.
+  `redirect_url` = `/funds/return/{paymentId}`; `remark1` = `Deposit #{paymentId}`.
+- **Payment state** comes only from `check-order-status`:
+  - paid = `txnStatus` is `COMPLETED`/`SUCCESS` **and** `status` (if present) is `SUCCESS`/`COMPLETED`
+  - failed = `txnStatus` FAILED/ERROR/… or `status` FAILED/ERROR
+  - anything else, including a missing `txnStatus`, stays pending and is never credited.
+  A response with `"status": false` is a rejected query, not a payment state.
+- **Amount**: must equal the expected amount exactly (to the paisa). A lower, higher
+  or missing amount, or an `orderId` belonging to another order, holds the payment
+  for **admin review** (`needs_review`). Review payments are never auto-credited.
+- **UTR** and the verified amount are stored on the payment and shown to the
+  user and admin.
+- **Webhook**: because no payload format or signature is documented, callbacks
+  are treated as untrusted notifications. The handler accepts JSON, form or query
+  data, reads only `order_id`/`orderId` to find the payment, ignores any status or
+  amount in it, and settles from `check-order-status`. Unknown references return
+  200 and trigger no API call. A reference-less request returns 400. If the status
+  API is unreachable it returns 503 (cron retries every 5 minutes anyway). Tokens
+  echoed in callbacks are masked before logging. GET and POST are both accepted,
+  since the method is undocumented.
+- **Create-order failures**:
+  - Rejection (`status:false`, including `order_id already exists`): the payment is
+    marked failed, its order reference is detached so no later callback can match it,
+    and the customer sees a generic message.
+  - Connection failure before sending: the payment is marked failed.
+  - Timeout after sending, HTTP 5xx, non-JSON, or success without `payment_url`: it is
+    not retried blindly. The server asks `check-order-status` for that `order_id`.
+    If the gateway says the order is unknown, the payment is failed. Otherwise the
+    payment stays pending (it expires after 30 min) and cron keeps verifying it.
+    The customer is asked to try again, which creates a new order with a new `order_id`.
+- **Currency**: the docs do not specify one. The gateway is offered only when the
+  site currency equals the configured *Account currency* (default `INR`); amounts are
+  never converted.
+- **Test mode**: none is documented, so none is implemented.
 
-1. **Base URL(s)** for production and sandbox, and API version.
-2. **Authentication**: header names / key + secret / token flow; whether requests must be signed.
-3. **Create payment endpoint**: method, URL, request fields (amount format and currency — INR?, order reference, customer fields, return URL, callback URL), and response fields (payment/redirect URL or UPI intent/QR, transaction reference, expiry).
-4. **Callback/webhook**: HTTP method, content type, full field list, every possible status value and which ones mean "paid".
-5. **Signature algorithm** for callbacks (e.g. HMAC-SHA256 over which fields/order, which secret) and a sample signed payload for testing.
-6. **Status query endpoint** to verify a payment server-side (required — we never credit on a callback alone).
-7. Amount limits, retry behaviour for callbacks, and IP addresses callbacks come from.
-8. Sandbox credentials.
+### Setup
 
-Then implement `createPayment()`, `handleCallback()` and `verifyPayment()`
-following `OxaPayGateway` as the template (same return types), set
-`isImplemented()` to `true`, map statuses in a `mapStatus()` method, and add
-tests to `tests/PaymentTest.php` modelled on the OxaPay ones (valid, invalid
-signature, duplicate, failed, amount mismatch).
+1. Admin → **Payment gateways** → **UPI (P2Gateway)** → *Configure*.
+2. Paste the **API token** (stored encrypted, shown only masked, never sent to the browser).
+3. Leave the endpoints at their documented defaults (HTTPS is enforced) and keep *Account currency* = `INR` (site currency must be INR).
+4. Set min/max, display name, sort order → Status **Active** → Save.
+5. Copy the displayed webhook URL `https://YOUR-DOMAIN/webhooks/p2gateway` into
+   **P2Gateway Merchant Dashboard → Webhook URL**.
+6. Make sure cron is running (it resolves missed callbacks).
+
+### Live test (required before calling it production-ready)
+
+Automated tests use a fake network. Before launch, run **one small real payment**
+(e.g. ₹10) and confirm each step:
+
+| # | Check | Where |
+|---|---|---|
+| 1 | Payment is created and you are redirected to a `p2gateway.in` page | Add Funds |
+| 2 | Pay with a UPI app | phone |
+| 3 | The callback arrives: a new row with result `Unsigned callback; API-verified: Credited` | Admin → Logs → Payment webhooks |
+| 4 | Correct amount credited once; ledger shows one `deposit` | Admin → Transactions |
+| 5 | UTR and verified amount recorded | Admin → Payments (References column) |
+| 6 | Payment status `completed`; return page says "Payment confirmed" | user side |
+| 7 | Re-send the callback (or reload the return page): result `Duplicate: already completed`, no new transaction | Logs / Transactions |
+| 8 | Look at the raw callback payload in the webhook log. If P2Gateway documents a signature later, implement it exactly in `handleCallback()` and set `callbacksAreSigned()` to `true`. | Logs |
+| 9 | Check `storage/logs/payment-*.log` for `check-order-status` bodies. If real responses differ from the documented shape, adjust `verifyPayment()` before going live. | server |
 
 ---
 

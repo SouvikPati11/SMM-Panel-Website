@@ -27,6 +27,7 @@ DirectoryIndex index.php
 
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"
+    Header always unset X-Powered-By
     <FilesMatch "\.(css|js|svg|png|jpe?g|webp|gif|ico|woff2?)$">
         Header set Cache-Control "public, max-age=2592000"
     </FilesMatch>

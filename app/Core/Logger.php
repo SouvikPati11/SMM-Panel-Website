@@ -10,7 +10,7 @@ namespace App\Core;
  */
 final class Logger
 {
-    private const REDACT_KEYS = ['password', 'pass', 'key', 'api_key', 'secret', 'token', 'sign', 'hmac', 'merchant_api_key', 'authorization', 'cookie', 'twofa_secret'];
+    private const REDACT_KEYS = ['password', 'pass', 'key', 'api_key', 'secret', 'token', 'sign', 'hmac', 'merchant_api_key', 'authorization', 'cookie', 'twofa_secret', 'user_token', 'credentials_enc', 'api_key_enc', 'password_hash'];
 
     public static function log(string $channel, string $level, string $message, array $context = []): void
     {

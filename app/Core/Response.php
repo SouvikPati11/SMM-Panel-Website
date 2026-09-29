@@ -72,6 +72,7 @@ final class Response
     {
         if (!headers_sent()) {
             http_response_code($this->status);
+            header_remove('X-Powered-By');
             foreach ($this->headers as $k => $v) {
                 header($k . ': ' . $v);
             }

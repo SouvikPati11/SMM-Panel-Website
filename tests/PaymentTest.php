@@ -188,16 +188,6 @@ T::test('Cryptomus: failed / cancelled statuses never credit', function () use (
     T::eq('0.000000', Fx::balance((int) $u['id']));
 });
 
-T::test('P2Gateway: placeholder is never offered and refuses webhooks', function () {
-    $db = Database::instance();
-    $db->query("UPDATE payment_methods SET status = 'active' WHERE gateway = 'p2gateway'");
-    $ids = array_column(PaymentService::availableMethods(), 'gateway');
-    T::true(!in_array('p2gateway', $ids, true), 'p2gateway must not be listed');
-    $r = PaymentService::handleWebhook('p2gateway', Request::create('POST', '/webhooks/p2gateway', [], [], '{"status":"success","amount":"999"}'));
-    T::eq(200, $r->status());
-    $db->query("UPDATE payment_methods SET status = 'disabled' WHERE gateway = 'p2gateway'");
-});
-
 // ------------------------------------------------------------------ Manual payments
 
 $manualId = (int) Database::instance()->fetchColumn("SELECT id FROM payment_methods WHERE gateway = 'manual'");

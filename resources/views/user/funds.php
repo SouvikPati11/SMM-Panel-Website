@@ -52,6 +52,7 @@
           <?= csrf_field() ?>
           <input type="hidden" name="method_id" class="method-id" value="">
           <div class="field"><label>Amount</label><div class="input-group"><span class="input-prefix"><?= e(setting('currency_symbol', '$')) ?></span><input class="input" name="amount" type="number" step="0.01" min="<?= e(setting('min_deposit', '1')) ?>" required inputmode="decimal" placeholder="<?= e(setting('min_deposit', '1')) ?>"></div></div>
+          <div class="field" data-for-gateway="p2gateway" hidden><label for="customer_mobile">Mobile number</label><input class="input" id="customer_mobile" name="customer_mobile" type="tel" inputmode="tel" maxlength="14" autocomplete="tel" value="<?= e($lastMobile) ?>" placeholder="10-digit mobile number"><div class="hint">Mobile number linked to your UPI app. Payment links expire after 30 minutes.</div></div>
           <div class="field"><label>Promo code <span class="text-muted">(optional)</span></label><div class="input-group"><input class="input" name="coupon" maxlength="40" autocomplete="off"><button class="btn btn-secondary" type="button" data-coupon-check="<?= e(url('/funds/coupon')) ?>">Apply</button></div><div class="coupon-result hint"></div></div>
           <button class="btn btn-primary btn-lg btn-block" type="submit"><?= icon('external') ?> Continue to payment</button>
           <p class="hint text-center">You'll be redirected to the secure payment page. Your balance is credited automatically once the payment is confirmed.</p>

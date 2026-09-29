@@ -16,9 +16,10 @@ installer, add one cron line.
   cron tasks.
 - Standard **SMM API v2** for resellers (compatible with common panel scripts).
 - Payment gateways: **OxaPay** and **Cryptomus** (implemented against the
-  vendors' official SDKs), **manual** methods (UPI/bank/crypto address with QR +
-  proof upload) and an isolated **P2Gateway.in placeholder** (see
-  [Known limitations](#known-limitations)).
+  vendors' official SDKs), **P2Gateway.in UPI** (implemented against the
+  merchant API documentation; callbacks verified through the status API),
+  and **manual** methods (UPI/bank/crypto address with QR + proof upload). None
+  has been tested with a live payment yet (see [Known limitations](#known-limitations)).
 
 Design and research notes: [`docs/architecture.md`](docs/architecture.md).
 
@@ -176,10 +177,13 @@ Full details: [`docs/payment-gateways.md`](docs/payment-gateways.md).
 | OxaPay | ✅ implemented (API v1) | Merchant API key |
 | Cryptomus | ✅ implemented (API v1) | Merchant UUID + Payment API key |
 | Manual (UPI / bank / crypto address) | ✅ implemented | Account details, optional QR image |
-| P2Gateway.in | ⚠️ placeholder — cannot be enabled | Official API documentation (list in the doc) |
+| P2Gateway.in (UPI) | ✅ implemented (create-order + check-order-status) — needs one live test | API token, site currency INR, webhook URL set in the P2Gateway dashboard |
 
 Wallets are credited only after a **verified webhook plus a server-side status
-query** (or the cron verifier), never from a browser redirect.
+query** (or the cron verifier), never from a browser redirect. P2Gateway
+callbacks are unsigned, so their content is ignored apart from the order
+reference; the payment state and amount always come from P2Gateway's status API,
+and the amount must match exactly or the payment is held for admin review.
 
 ---
 
@@ -214,11 +218,27 @@ Admin → *Cron tasks* shows the exact command for your server and lets you run 
 |---|---|
 | OxaPay | `https://your-domain/webhooks/oxapay` |
 | Cryptomus | `https://your-domain/webhooks/cryptomus` |
+| P2Gateway | `https://your-domain/webhooks/p2gateway` |
 
-Both URLs are sent automatically with every invoice, so no dashboard setting is
-strictly required; set them in the gateway dashboard too if it offers a default
-callback URL. Every delivery is visible in Admin → Logs → *Payment webhooks*
-with its signature result.
+The OxaPay and Cryptomus URLs are sent automatically with every invoice, so no
+dashboard setting is strictly required. **P2Gateway's URL must be entered in the
+P2Gateway Merchant Dashboard → Webhook URL** (it is not sent per order). Cron
+also re-checks pending payments every few minutes, so a missed callback delays
+the credit but does not lose it. Every delivery is visible in Admin → Logs →
+*Payment webhooks* with its signature/verification result.
+
+## Upgrading an existing installation
+
+Upload the new files (keep `.env`, `storage/` and `public/uploads/`), then run
+the database migrations once:
+
+```
+php database/migrate.php
+```
+
+It is safe to run repeatedly and prints "Database schema is up to date." when there is
+nothing to do. Without SSH, use **Admin → System health → Apply database
+upgrades**, which runs the same migrations.
 
 ---
 
@@ -331,7 +351,7 @@ php tests/run.php            # all suites
 php tests/run.php Payment    # one suite
 ```
 
-The suite drops and recreates every table in the test database, then runs 87
+The suite drops and recreates every table in the test database, then runs 109
 integration tests through the real services and the full HTTP kernel, with a
 fake HTTP transport standing in for providers and gateways:
 
@@ -339,7 +359,7 @@ fake HTTP transport standing in for providers and gateways:
 |---|---|
 | Auth | registration + validation, disabled registration, login by username/email, wrong password, user/admin guard separation, HTTP login/logout, TOTP 2FA, password reset (hashed single-use token, expiry, session invalidation, no enumeration), session invalidation, email verification gate |
 | Orders | success pricing, server-side price, discounts, invalid/disabled/hidden service, min/max/format/URL validation, insufficient balance, idempotent double submit, provider rejection → refund, provider unreachable → retry, provider timeout → parked (no retry, no refund), invalid response, status sync, exact partial refund once, cancel refund once, refill forward + sync, local cancel & ownership, manual services, admin refund, custom comments, drip-feed, mass order, catalog import & price sync |
-| Payments | OxaPay invoice, limits, paid webhook credits once, duplicate callback, invalid/missing HMAC, forged "paid" rejected by server-side check, underpayment held, expired, cron recovery of missed webhook; Cryptomus signed paid (once), invalid signature, fail/cancel; P2Gateway placeholder never offered; manual approve once / reject / duplicate reference / corrected amount; coupons (cap, per-user, expiry, global limit); referral commission, transfer, self/same-IP blocking |
+| Payments | OxaPay invoice, limits, paid webhook credits once, duplicate callback, invalid/missing HMAC, forged "paid" rejected by server-side check, underpayment held, expired, cron recovery of missed webhook; Cryptomus signed paid (once), invalid signature, fail/cancel; P2Gateway (exact form fields, success/failure/duplicate order_id, timeout/5xx/non-JSON/missing-URL reconciliation, webhook → status-API verification for SUCCESS/COMPLETED/PENDING/FAILED/ERROR, forged webhook, unknown order, replay, amount mismatch → review, return page never credits, webhook+cron+return race, token never in HTML/logs); manual approve once / reject / duplicate reference / corrected amount; coupons (cap, per-user, expiry, global limit); referral commission, transfer, self/same-IP blocking |
 | Security | CSRF missing/wrong token, stateless exemptions, auth required, user≠admin, cross-user order/ticket access, role permissions (403), session invalidation, stored XSS in user & admin views, HTML sanitizer, SQL injection in searches, upload abuse (PHP-as-JPG, GIF/PHP polyglot re-encoded, oversize), path traversal, login brute force, security headers/CSP, encryption at rest, installer lock, robots.txt |
 | API | invalid key, hashed storage, balance, services, add + single/multi status, invalid service/quantity/funds, provider failure, cross-user isolation, per-key rate limit, invalid-key IP throttle, disabled/revoked keys, unknown action |
 | Money | exact decimals, ledger before/after, idempotent references, no negative balance, audited admin adjustments, **4 concurrent processes racing on one wallet** |
@@ -357,6 +377,7 @@ overlapping runs; and against a real Apache the `.htaccess` rules return 403 for
 - [ ] Add a provider → test connection → import 2–3 services with markup.
 - [ ] Place a small real order; watch it move to completed via cron.
 - [ ] Make a small **real** OxaPay/Cryptomus payment; confirm webhook log shows *Credited* and the balance increased once.
+- [ ] Make a small **real** P2Gateway UPI payment and walk through the live-test table in [`docs/payment-gateways.md`](docs/payment-gateways.md#live-test-required-before-calling-it-production-ready).
 - [ ] Submit a manual payment with proof; approve it; submit another and reject it.
 - [ ] Create a promo code and use it on a deposit; confirm the bonus transaction.
 - [ ] Use the reseller API with a generated key (`balance`, `services`, `add`, `status`).
@@ -395,14 +416,15 @@ and database backed up · `TRUSTED_PROXIES` set if you use Cloudflare.
 
 ## Known limitations
 
-- **P2Gateway.in is not implemented.** No official API documentation was
-  obtainable during development, so its adapter is an isolated placeholder that
-  cannot be enabled and ignores callbacks. Everything required to finish it is
-  listed in [`docs/payment-gateways.md`](docs/payment-gateways.md#p2gatewayin--placeholder-not-implemented).
-- **Gateway integrations were verified against the vendors' official SDK source
-  code and docs, but not against live gateway servers** (the build environment
-  could not reach them). Run one small real payment per gateway (or OxaPay
-  sandbox mode) before launch.
+- **No gateway has been tested against live servers.** OxaPay and Cryptomus
+  were checked against the vendors' official SDK source code and docs, and
+  P2Gateway against its merchant API documentation, all with a fake network
+  (the build environment could not reach them). Run one small real payment per
+  gateway (or OxaPay sandbox mode) before launch.
+- **P2Gateway's webhook payload and signature are not documented.** Callbacks
+  are treated as unsigned notifications and every payment is confirmed through
+  `check-order-status`. No sandbox or test mode is documented, and the gateway
+  is only offered when the site currency is INR (the account currency setting).
 - **Provider integration** follows the standard API v2 contract; each provider's
   real responses should be checked once with *Test connection*/*Fetch services*.
   Exotic providers may need the JSON parameter map or a custom adapter.

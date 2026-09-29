@@ -45,4 +45,24 @@ interface PaymentGatewayInterface
 
     /** Convenience: normalised status string from verifyPayment(). */
     public function getPaymentStatus(array $payment): string;
+
+    /** false = callbacks are unauthenticated; settle only from verifyPayment(). */
+    public function callbacksAreSigned(): bool;
+
+    /** true = verified amount must equal the expected amount exactly. */
+    public function requiresExactAmount(): bool;
+
+    /** Merchant order reference to send; stored in payments.merchant_order_id (unique). */
+    public function merchantOrderId(array $payment): string;
+
+    /** Gateway-enforced order lifetime in minutes, or null. */
+    public function orderTimeoutMinutes(): ?int;
+
+    public function supportsCurrency(string $currency): bool;
+
+    /** Extra customer inputs for the Add Funds form. */
+    public function paymentFields(): array;
+
+    /** Validate/clean paymentFields() input (throws ValidationException). */
+    public function validatePaymentFields(array $input): array;
 }

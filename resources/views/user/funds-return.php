@@ -8,7 +8,8 @@
   <?php elseif ($payment['status'] === 'pending'): ?>
     <div class="stat-icon warning" style="margin:0 auto 14px;width:56px;height:56px"><?= icon('clock') ?></div>
     <h1>Waiting for confirmation</h1>
-    <p class="text-muted">We haven't received confirmation from the payment provider yet. Crypto payments can take a few minutes to confirm on the network. Your balance is credited automatically — you can safely leave this page.</p>
+    <?php if ((int) $payment['needs_review'] === 1): ?><p class="text-muted">Your payment is being reviewed by our team because the confirmed amount differs from the requested amount. You don't need to pay again — we'll update you shortly.</p><?php else: ?>
+    <p class="text-muted">We haven't received confirmation from the payment provider yet. Crypto payments can take a few minutes to confirm on the network. Your balance is credited automatically — you can safely leave this page.</p><?php endif ?>
     <div class="btn-group" style="justify-content:center"><a class="btn btn-secondary" href="<?= e(url('/funds/return/' . $payment['id'])) ?>"><?= icon('refresh') ?> Check again</a><?php if ($payment['pay_url']): ?><a class="btn btn-primary" href="<?= e($payment['pay_url']) ?>" rel="noopener">Return to payment page</a><?php endif ?></div>
   <?php else: ?>
     <div class="stat-icon danger" style="margin:0 auto 14px;width:56px;height:56px"><?= icon('x-circle') ?></div>
@@ -16,5 +17,5 @@
     <p class="text-muted">This payment was not completed. No funds were taken from your balance. If you did send money, please open a support ticket with your transaction ID.</p>
     <div class="btn-group" style="justify-content:center"><a class="btn btn-primary" href="<?= e(url('/funds')) ?>">Try again</a><a class="btn btn-secondary" href="<?= e(url('/tickets/new?category=payment')) ?>">Contact support</a></div>
   <?php endif ?>
-  <p class="text-xs text-muted mt-3 mb-0">Payment #<?= (int) $payment['id'] ?> · <?= e(\App\Services\PaymentService::gatewayLabel($payment['gateway'])) ?></p>
+  <p class="text-xs text-muted mt-3 mb-0">Payment #<?= (int) $payment['id'] ?> · <?= e(\App\Services\PaymentService::gatewayLabel($payment['gateway'])) ?><?= $payment['utr'] ? ' · UTR ' . e($payment['utr']) : '' ?></p>
 </div></div>

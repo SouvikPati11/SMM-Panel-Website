@@ -39,6 +39,7 @@ foreach ($db->fetchAll('SHOW TABLES') as $row) {
 $db->pdo()->exec('SET FOREIGN_KEY_CHECKS=1');
 $db->pdo()->exec((string) file_get_contents(BASE_PATH . '/database/schema.sql'));
 App\Install\Seeder::run();
+App\Install\Migrator::markAllApplied();
 App\Services\SettingsService::flush();
 App\Services\SettingsService::set('mail_driver', 'array');
 App\Core\App::$forceInstalled = true;

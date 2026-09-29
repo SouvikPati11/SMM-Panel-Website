@@ -310,6 +310,11 @@
       var gateway = sel ? sel.getAttribute('data-gateway') : '';
       $$('.method-panel').forEach(function (p) { p.hidden = p.getAttribute('data-method') !== id; });
       $('#gateway-form').hidden = !sel || gateway === 'manual';
+      $$('[data-for-gateway]').forEach(function (f) {
+        var on = f.getAttribute('data-for-gateway') === gateway;
+        f.hidden = !on;
+        $$('input', f).forEach(function (i) { i.required = on; i.disabled = !on; });
+      });
       $$('.method-id').forEach(function (i) { i.value = id; });
       $$('.method-card').forEach(function (c) { c.classList.toggle('active', c.getAttribute('data-method') === id); });
     };

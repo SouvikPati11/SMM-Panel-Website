@@ -351,7 +351,7 @@ php tests/run.php            # all suites
 php tests/run.php Payment    # one suite
 ```
 
-The suite drops and recreates every table in the test database, then runs 109
+The suite drops and recreates every table in the test database, then runs 110
 integration tests through the real services and the full HTTP kernel, with a
 fake HTTP transport standing in for providers and gateways:
 

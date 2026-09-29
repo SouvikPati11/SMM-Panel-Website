@@ -105,7 +105,7 @@ Setup:
 ## P2Gateway.in (UPI)
 
 Implementation: `app/Payment/Gateways/P2GatewayGateway.php` ·
-Tests: `tests/P2GatewayTest.php` (23 tests)
+Tests: `tests/P2GatewayTest.php` (24 tests)
 
 **Source:** the P2Gateway Merchant API documentation from the merchant dashboard,
 supplied by the site owner. Only what is documented there is used:

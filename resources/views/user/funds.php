@@ -1,0 +1,87 @@
+<?php $this->extend('layouts/user'); use App\Core\Money; ?>
+<div class="page-head"><div><h1>Add funds</h1><p>Your balance: <strong><?= e(money($user['balance'])) ?></strong></p></div></div>
+
+<div class="grid-main" id="funds-page">
+  <div>
+    <?php if (!$methods): ?>
+      <div class="card"><div class="empty"><?= icon('wallet') ?><h3>No payment methods available</h3><p>Please contact support to add funds.</p></div></div>
+    <?php else: ?>
+    <div class="card mb-2">
+      <div class="card-header"><h2>1. Choose a payment method</h2></div>
+      <div class="card-body" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+        <?php foreach ($methods as $i => $m): ?>
+        <label class="card method-card" data-method="<?= (int) $m['id'] ?>" style="padding:14px;cursor:pointer;margin:0">
+          <span class="flex items-center gap-1"><input type="radio" name="method_select" value="<?= (int) $m['id'] ?>" data-gateway="<?= e($m['gateway']) ?>" <?= $i === 0 ? 'checked' : '' ?> style="accent-color:var(--primary)">
+          <strong><?= e($m['name']) ?></strong></span>
+          <span class="text-xs text-muted" style="display:block;margin-top:4px"><?= e(money($m['min_amount'])) ?> – <?= e(money($m['max_amount'])) ?><?= Money::isPositive((string) $m['fee_percent']) ? ' · ' . e(rtrim(rtrim($m['fee_percent'], '0'), '.')) . '% fee' : '' ?></span>
+        </label>
+        <?php endforeach ?>
+      </div>
+    </div>
+
+    <?php foreach ($methods as $m): ?>
+    <div class="card mb-2 method-panel" data-method="<?= (int) $m['id'] ?>" hidden>
+      <div class="card-header"><h2>2. <?= e($m['name']) ?></h2></div>
+      <div class="card-body">
+        <?php if ($m['instructions']): ?><div class="svc-desc mb-2" style="max-height:none"><?= e($m['instructions']) ?></div><?php endif ?>
+        <?php if ($m['gateway'] === 'manual'): ?>
+          <?php if ($m['account']): ?>
+            <div class="field"><div class="label">Pay to</div><div class="copy-box"><span id="acct-<?= (int) $m['id'] ?>"><?= e($m['account']) ?></span><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($m['account']) ?>"><?= icon('copy') ?> <span class="copy-label">Copy</span></button></div></div>
+          <?php endif ?>
+          <?php if ($m['qr_image']): ?><div class="field text-center"><img src="<?= e(upload_url($m['qr_image'])) ?>" alt="Payment QR code" width="220" height="220" style="border-radius:12px;border:1px solid var(--border);background:#fff;padding:8px" loading="lazy"></div><?php endif ?>
+          <form method="post" action="<?= e(url('/funds/manual')) ?>" enctype="multipart/form-data">
+            <?= csrf_field() ?>
+            <input type="hidden" name="method_id" class="method-id" value="<?= (int) $m['id'] ?>">
+            <div class="form-grid">
+              <div class="field"><label>Amount paid</label><div class="input-group"><span class="input-prefix"><?= e(setting('currency_symbol', '$')) ?></span><input class="input" name="amount" type="number" step="0.01" min="<?= e($m['min_amount']) ?>" max="<?= e($m['max_amount']) ?>" required inputmode="decimal"></div></div>
+              <div class="field"><label>Transaction / reference ID</label><input class="input" name="reference" required maxlength="120" placeholder="e.g. UTR number"></div>
+            </div>
+            <div class="field"><label>Payment screenshot <?= (int) $m['require_proof'] === 1 ? '' : '<span class="text-muted">(optional)</span>' ?></label><input class="input" type="file" name="proof" accept="image/jpeg,image/png,image/webp" <?= (int) $m['require_proof'] === 1 ? 'required' : '' ?>><div class="hint">JPG, PNG or WebP, max <?= round((int) \App\Core\Config::get('uploads.max_bytes') / 1048576, 1) ?> MB.</div></div>
+            <div class="field"><label>Promo code <span class="text-muted">(optional)</span></label><div class="input-group"><input class="input" name="coupon" maxlength="40" autocomplete="off"><button class="btn btn-secondary" type="button" data-coupon-check="<?= e(url('/funds/coupon')) ?>">Apply</button></div><div class="coupon-result hint"></div></div>
+            <?= \App\Helpers\Form::input('note', 'Note (optional)', '', ['maxlength' => 500]) ?>
+            <button class="btn btn-primary btn-lg btn-block" type="submit"><?= icon('upload') ?> Submit for verification</button>
+          </form>
+        <?php endif ?>
+      </div>
+    </div>
+    <?php endforeach ?>
+
+    <div class="card mb-2" id="gateway-form" hidden>
+      <div class="card-body">
+        <form method="post" action="<?= e(url('/funds')) ?>">
+          <?= csrf_field() ?>
+          <input type="hidden" name="method_id" class="method-id" value="">
+          <div class="field"><label>Amount</label><div class="input-group"><span class="input-prefix"><?= e(setting('currency_symbol', '$')) ?></span><input class="input" name="amount" type="number" step="0.01" min="<?= e(setting('min_deposit', '1')) ?>" required inputmode="decimal" placeholder="<?= e(setting('min_deposit', '1')) ?>"></div></div>
+          <div class="field"><label>Promo code <span class="text-muted">(optional)</span></label><div class="input-group"><input class="input" name="coupon" maxlength="40" autocomplete="off"><button class="btn btn-secondary" type="button" data-coupon-check="<?= e(url('/funds/coupon')) ?>">Apply</button></div><div class="coupon-result hint"></div></div>
+          <button class="btn btn-primary btn-lg btn-block" type="submit"><?= icon('external') ?> Continue to payment</button>
+          <p class="hint text-center">You'll be redirected to the secure payment page. Your balance is credited automatically once the payment is confirmed.</p>
+        </form>
+      </div>
+    </div>
+    <?php endif ?>
+  </div>
+
+  <div>
+    <div class="card mb-2">
+      <div class="card-header"><h2>Recent payments</h2></div>
+      <?php if (!$payments): ?><div class="empty" style="padding:24px"><p class="mb-0">No payments yet.</p></div><?php else: ?>
+      <ul class="list-plain list-rows">
+        <?php foreach ($payments as $p): ?>
+        <li><div style="min-width:0"><div class="cell-title"><?= e(money($p['amount'])) ?> <span class="text-muted text-xs">#<?= (int) $p['id'] ?></span></div><div class="cell-sub truncate"><?= e($p['method'] ?? \App\Services\PaymentService::gatewayLabel($p['gateway'])) ?> · <?= e(time_ago($p['created_at'])) ?></div></div>
+          <div class="text-right"><?= status_badge($p['status']) ?><?php if ($p['status'] === 'pending' && $p['pay_url'] && $p['gateway'] !== 'manual'): ?><br><a class="text-xs" href="<?= e($p['pay_url']) ?>" rel="noopener">Pay now</a><?php endif ?></div></li>
+        <?php endforeach ?>
+      </ul>
+      <?php endif ?>
+    </div>
+    <?php if ($manualRequests): ?>
+    <div class="card">
+      <div class="card-header"><h2>Manual requests</h2></div>
+      <ul class="list-plain list-rows">
+        <?php foreach ($manualRequests as $r): ?>
+        <li><div style="min-width:0"><div class="cell-title"><?= e(money($r['amount'])) ?> · <?= e($r['method']) ?></div><div class="cell-sub truncate">Ref <?= e($r['reference']) ?> · <?= e(time_ago($r['created_at'])) ?></div><?php if ($r['status'] === 'rejected' && $r['admin_note']): ?><div class="text-xs text-danger"><?= e($r['admin_note']) ?></div><?php endif ?></div><?= status_badge($r['status']) ?></li>
+        <?php endforeach ?>
+      </ul>
+    </div>
+    <?php endif ?>
+  </div>
+</div>

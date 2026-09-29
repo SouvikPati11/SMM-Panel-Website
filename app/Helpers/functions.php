@@ -215,3 +215,17 @@ function json_attr(mixed $data): string
 {
     return e(json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT));
 }
+
+/**
+ * Render user-supplied links safely: only http(s) URLs become clickable
+ * (prevents javascript:/data: URLs from order links, profiles, etc.).
+ */
+function link_html(?string $url, ?string $text = null, string $class = ''): string
+{
+    $url = trim((string) $url);
+    $label = e($text ?? $url);
+    if ($url !== '' && preg_match('#^https?://[^\s]+$#i', $url)) {
+        return '<a href="' . e($url) . '" target="_blank" rel="noopener noreferrer nofollow"' . ($class ? ' class="' . e($class) . '"' : '') . ' title="' . e($url) . '">' . $label . '</a>';
+    }
+    return '<span' . ($class ? ' class="' . e($class) . '"' : '') . '>' . $label . '</span>';
+}

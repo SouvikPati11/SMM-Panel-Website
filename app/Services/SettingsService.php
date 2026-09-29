@@ -74,7 +74,8 @@ final class SettingsService
         'seo_keywords' => '',
         'seo_og_image' => '',
         'seo_robots_extra' => '',
-        'seo_head_code' => '',
+        'seo_google_verification' => '',
+        'seo_bing_verification' => '',
         'blog_enabled' => '1',
         // Email
         'mail_driver' => '',

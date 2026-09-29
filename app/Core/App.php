@@ -17,6 +17,8 @@ final class App
 {
     private static ?Router $router = null;
     private static ?Request $request = null;
+    /** Tests can force the installed state without touching storage/installed.lock. */
+    public static ?bool $forceInstalled = null;
 
     public static function router(): Router
     {
@@ -37,6 +39,9 @@ final class App
 
     public static function isInstalled(): bool
     {
+        if (self::$forceInstalled !== null) {
+            return self::$forceInstalled;
+        }
         return is_file(STORAGE_PATH . '/installed.lock');
     }
 

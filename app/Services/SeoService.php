@@ -88,8 +88,8 @@ final class SeoService
 
     public static function robots(): string
     {
-        $admin = admin_path();
-        $txt = "User-agent: *\nDisallow: /{$admin}/\nDisallow: /dashboard\nDisallow: /orders\nDisallow: /funds\nDisallow: /tickets\nDisallow: /account\nDisallow: /api/\nDisallow: /webhooks/\nDisallow: /install\n";
+        // The admin path is deliberately NOT listed: robots.txt is public and would reveal it.
+        $txt = "User-agent: *\nDisallow: /dashboard\nDisallow: /orders\nDisallow: /funds\nDisallow: /tickets\nDisallow: /account\nDisallow: /api/\nDisallow: /webhooks/\nDisallow: /install\n";
         $extra = trim((string) setting('seo_robots_extra', ''));
         if ($extra !== '') {
             $txt .= $extra . "\n";

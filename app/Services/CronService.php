@@ -16,12 +16,12 @@ use App\Core\RateLimiter;
 final class CronService
 {
     public const TASKS = [
-        'orders' => ['label' => 'Submit queued orders & sync order statuses', 'schedule' => '*/5 * * * *', 'stale_after' => 30],
-        'refills' => ['label' => 'Sync refill statuses', 'schedule' => '*/15 * * * *', 'stale_after' => 90],
-        'payments' => ['label' => 'Verify pending payments & expire invoices', 'schedule' => '*/5 * * * *', 'stale_after' => 30],
-        'provider_sync' => ['label' => 'Refresh provider catalogs, prices & balances', 'schedule' => '0 */6 * * *', 'stale_after' => 60 * 13],
-        'notifications' => ['label' => 'Send queued emails', 'schedule' => '* * * * *', 'stale_after' => 15],
-        'cleanup' => ['label' => 'Prune old logs, rate limits and tokens', 'schedule' => '30 3 * * *', 'stale_after' => 60 * 49],
+        'orders' => ['label' => 'Submit queued orders & sync order statuses', 'schedule' => '*/3 * * * *', 'interval' => 3, 'stale_after' => 30],
+        'refills' => ['label' => 'Sync refill statuses', 'schedule' => '*/15 * * * *', 'interval' => 15, 'stale_after' => 90],
+        'payments' => ['label' => 'Verify pending payments & expire invoices', 'schedule' => '*/5 * * * *', 'interval' => 5, 'stale_after' => 30],
+        'provider_sync' => ['label' => 'Refresh provider catalogs, prices & balances', 'schedule' => '0 */6 * * *', 'interval' => 360, 'stale_after' => 60 * 13],
+        'notifications' => ['label' => 'Send queued emails', 'schedule' => '* * * * *', 'interval' => 1, 'stale_after' => 15],
+        'cleanup' => ['label' => 'Prune old logs, rate limits and tokens', 'schedule' => '30 3 * * *', 'interval' => 1440, 'stale_after' => 60 * 49],
     ];
 
     public static function run(string $task): array
@@ -113,6 +113,25 @@ final class CronService
             }
         }
         return $n;
+    }
+
+    /**
+     * Run every task whose interval has elapsed since its last start. Designed
+     * to be called by ONE cron line every minute (or every 5 minutes).
+     * @return array<string, array>
+     */
+    public static function runDue(): array
+    {
+        $db = Database::instance();
+        $out = [];
+        foreach (self::TASKS as $task => $def) {
+            $last = $db->fetchColumn("SELECT started_at FROM cron_runs WHERE task = ? AND status <> 'skipped' ORDER BY id DESC LIMIT 1", [$task]);
+            $due = !$last || strtotime($last . ' UTC') <= time() - ($def['interval'] * 60) + 20;
+            if ($due) {
+                $out[$task] = self::run($task);
+            }
+        }
+        return $out;
     }
 
     /** Last run per task for the admin health page. */

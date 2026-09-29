@@ -1,0 +1,213 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Controllers\Admin;
+
+use App\Controllers\Controller;
+use App\Core\Database;
+use App\Core\Exceptions\ValidationException;
+use App\Core\HtmlSanitizer;
+use App\Core\Paginator;
+use App\Core\Request;
+use App\Core\Response;
+use App\Core\Validator;
+use App\Services\AuditService;
+use App\Services\Auth;
+use App\Services\UploadService;
+
+/** Pages, FAQ and blog. All HTML is passed through the allow-list sanitizer on save AND on render. */
+final class ContentController extends Controller
+{
+    // ------------------------------------------------------------ pages
+    public function pages(Request $request): Response
+    {
+        return $this->view('admin/content/pages', ['title' => 'Pages', 'pages' => Database::instance()->fetchAll('SELECT id, slug, title, status, is_system, show_in_footer, updated_at FROM pages ORDER BY is_system DESC, title')]);
+    }
+
+    public function pageForm(Request $request, int $id = 0): Response
+    {
+        $page = $id ? Database::instance()->fetch('SELECT * FROM pages WHERE id = ?', [$id]) : null;
+        if ($id && !$page) {
+            $this->notFound();
+        }
+        return $this->view('admin/content/page-form', ['title' => $page ? 'Edit page' : 'New page', 'page' => $page]);
+    }
+
+    public function savePage(Request $request): Response
+    {
+        $db = Database::instance();
+        $id = $request->int('id');
+        $existing = $id ? $db->fetch('SELECT * FROM pages WHERE id = ?', [$id]) : null;
+        $data = Validator::check($request->post(), ['title' => 'required|max:200', 'seo_title' => 'max:200', 'seo_description' => 'max:320']);
+        $slug = $existing && (int) $existing['is_system'] === 1 ? $existing['slug'] : slugify($request->str('slug') ?: $data['title']);
+        if ($db->fetchColumn('SELECT id FROM pages WHERE slug = ? AND id <> ?', [$slug, $id])) {
+            throw new ValidationException('Another page already uses this slug.');
+        }
+        $row = [
+            'slug' => $slug,
+            'title' => $data['title'],
+            'content' => HtmlSanitizer::clean((string) ($request->post()['content'] ?? '')),
+            'seo_title' => $data['seo_title'] ?: null,
+            'seo_description' => $data['seo_description'] ?: null,
+            'status' => $request->str('status') === 'draft' ? 'draft' : 'published',
+            'show_in_footer' => $request->bool('show_in_footer') ? 1 : 0,
+            'updated_at' => now(),
+        ];
+        if ($existing) {
+            $db->update('pages', $row, ['id' => $id]);
+        } else {
+            $id = $db->insert('pages', $row + ['created_at' => now()]);
+        }
+        AuditService::log('page.save', 'page', $id, ['slug' => $slug]);
+        $this->success('Page saved.');
+        return Response::redirect(admin_url('pages/' . $id . '/edit'));
+    }
+
+    public function deletePage(Request $request, int $id): Response
+    {
+        $db = Database::instance();
+        if ((int) $db->fetchColumn('SELECT is_system FROM pages WHERE id = ?', [$id]) === 1) {
+            throw new ValidationException('System pages (About, Terms, Privacy, Refund) can be edited but not deleted.');
+        }
+        $db->delete('pages', ['id' => $id]);
+        AuditService::log('page.delete', 'page', $id);
+        $this->success('Page deleted.');
+        return Response::redirect(admin_url('pages'));
+    }
+
+    // ------------------------------------------------------------ FAQ
+    public function faqs(Request $request): Response
+    {
+        return $this->view('admin/content/faqs', ['title' => 'FAQ', 'faqs' => Database::instance()->fetchAll('SELECT * FROM faqs ORDER BY sort_order, id')]);
+    }
+
+    public function saveFaq(Request $request): Response
+    {
+        $data = Validator::check($request->post(), ['question' => 'required|max:300', 'answer' => 'required|max:5000', 'sort_order' => 'integer']);
+        $db = Database::instance();
+        $row = ['question' => $data['question'], 'answer' => $data['answer'], 'sort_order' => (int) ($data['sort_order'] ?: 0), 'status' => $request->str('status') === 'hidden' ? 'hidden' : 'active', 'updated_at' => now()];
+        $id = $request->int('id');
+        $id ? $db->update('faqs', $row, ['id' => $id]) : $db->insert('faqs', $row + ['created_at' => now()]);
+        $this->success('FAQ saved.');
+        return Response::redirect(admin_url('faq'));
+    }
+
+    public function deleteFaq(Request $request, int $id): Response
+    {
+        Database::instance()->delete('faqs', ['id' => $id]);
+        $this->success('FAQ deleted.');
+        return Response::redirect(admin_url('faq'));
+    }
+
+    // ------------------------------------------------------------ blog
+    public function posts(Request $request): Response
+    {
+        $db = Database::instance();
+        $posts = Paginator::query('p.id, p.title, p.slug, p.status, p.published_at, p.views, c.name AS category', 'FROM blog_posts p LEFT JOIN blog_categories c ON c.id = p.category_id', [], 'p.id DESC', $this->pageNum($request), 30);
+        $cats = $db->fetchAll('SELECT c.*, (SELECT COUNT(*) FROM blog_posts p WHERE p.category_id = c.id) n FROM blog_categories c ORDER BY name');
+        return $this->view('admin/content/posts', ['title' => 'Blog', 'posts' => $posts, 'cats' => $cats]);
+    }
+
+    public function postForm(Request $request, int $id = 0): Response
+    {
+        $db = Database::instance();
+        $post = $id ? $db->fetch('SELECT * FROM blog_posts WHERE id = ?', [$id]) : null;
+        if ($id && !$post) {
+            $this->notFound();
+        }
+        $tags = $post ? implode(', ', array_column($db->fetchAll('SELECT t.name FROM blog_tags t JOIN blog_post_tags pt ON pt.tag_id = t.id WHERE pt.post_id = ?', [$id]), 'name')) : '';
+        return $this->view('admin/content/post-form', ['title' => $post ? 'Edit post' : 'New post', 'post' => $post, 'tags' => $tags, 'categories' => $db->fetchPairs('SELECT id, name FROM blog_categories ORDER BY name')]);
+    }
+
+    public function savePost(Request $request): Response
+    {
+        $db = Database::instance();
+        $id = $request->int('id');
+        $existing = $id ? $db->fetch('SELECT * FROM blog_posts WHERE id = ?', [$id]) : null;
+        $data = Validator::check($request->post(), ['title' => 'required|max:220', 'excerpt' => 'max:500', 'seo_title' => 'max:200', 'seo_description' => 'max:320']);
+        $slug = slugify($request->str('slug') ?: $data['title']);
+        if ($db->fetchColumn('SELECT id FROM blog_posts WHERE slug = ? AND id <> ?', [$slug, $id])) {
+            throw new ValidationException('Another post already uses this slug.');
+        }
+        $content = HtmlSanitizer::clean((string) ($request->post()['content'] ?? ''));
+        if (trim(strip_tags($content)) === '') {
+            throw new ValidationException('Post content is required.');
+        }
+        $status = $request->str('status') === 'published' ? 'published' : 'draft';
+        $publishedAt = $existing['published_at'] ?? null;
+        if ($request->str('published_at') !== '') {
+            $publishedAt = (new \DateTimeImmutable($request->str('published_at'), display_tz()))->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        } elseif ($status === 'published' && !$publishedAt) {
+            $publishedAt = now();
+        }
+        $catId = $request->int('category_id') ?: null;
+        $row = [
+            'category_id' => $catId && $db->fetchColumn('SELECT id FROM blog_categories WHERE id = ?', [$catId]) ? $catId : null,
+            'title' => $data['title'],
+            'slug' => $slug,
+            'excerpt' => $data['excerpt'] ?: mb_substr(trim(preg_replace('/\s+/', ' ', strip_tags($content))), 0, 240),
+            'content' => $content,
+            'seo_title' => $data['seo_title'] ?: null,
+            'seo_description' => $data['seo_description'] ?: null,
+            'status' => $status,
+            'published_at' => $publishedAt,
+            'updated_at' => now(),
+        ];
+        if ($file = $request->file('featured_image')) {
+            $row['featured_image'] = UploadService::storePublicImage($file, 'blog');
+            UploadService::deletePublic($existing['featured_image'] ?? null);
+        } elseif ($request->bool('remove_image')) {
+            UploadService::deletePublic($existing['featured_image'] ?? null);
+            $row['featured_image'] = null;
+        }
+        $db->transaction(function (Database $db) use (&$id, $existing, $row, $request): void {
+            if ($existing) {
+                $db->update('blog_posts', $row, ['id' => $id]);
+            } else {
+                $id = $db->insert('blog_posts', $row + ['admin_id' => Auth::adminId(), 'created_at' => now()]);
+            }
+            $db->query('DELETE FROM blog_post_tags WHERE post_id = ?', [$id]);
+            foreach (array_slice(array_unique(array_filter(array_map('trim', explode(',', $request->str('tags'))))), 0, 15) as $tag) {
+                $tag = mb_substr($tag, 0, 80);
+                $tslug = slugify($tag);
+                $tid = (int) $db->fetchColumn('SELECT id FROM blog_tags WHERE slug = ?', [$tslug]) ?: $db->insert('blog_tags', ['name' => $tag, 'slug' => $tslug]);
+                $db->query('INSERT IGNORE INTO blog_post_tags (post_id, tag_id) VALUES (?, ?)', [$id, $tid]);
+            }
+        });
+        AuditService::log('blog.save', 'blog_post', $id, ['status' => $status]);
+        $this->success('Post saved.');
+        return Response::redirect(admin_url('blog/' . $id . '/edit'));
+    }
+
+    public function deletePost(Request $request, int $id): Response
+    {
+        $db = Database::instance();
+        UploadService::deletePublic($db->fetchColumn('SELECT featured_image FROM blog_posts WHERE id = ?', [$id]));
+        $db->delete('blog_posts', ['id' => $id]);
+        AuditService::log('blog.delete', 'blog_post', $id);
+        $this->success('Post deleted.');
+        return Response::redirect(admin_url('blog'));
+    }
+
+    public function saveBlogCategory(Request $request): Response
+    {
+        $data = Validator::check($request->post(), ['name' => 'required|max:120']);
+        $db = Database::instance();
+        $id = $request->int('id');
+        $slug = slugify($request->str('slug') ?: $data['name']);
+        if ($db->fetchColumn('SELECT id FROM blog_categories WHERE slug = ? AND id <> ?', [$slug, $id])) {
+            throw new ValidationException('Slug already used.');
+        }
+        $id ? $db->update('blog_categories', ['name' => $data['name'], 'slug' => $slug], ['id' => $id]) : $db->insert('blog_categories', ['name' => $data['name'], 'slug' => $slug, 'created_at' => now()]);
+        $this->success('Category saved.');
+        return Response::redirect(admin_url('blog'));
+    }
+
+    public function deleteBlogCategory(Request $request, int $id): Response
+    {
+        Database::instance()->delete('blog_categories', ['id' => $id]);
+        $this->success('Category deleted (its posts are now uncategorised).');
+        return Response::redirect(admin_url('blog'));
+    }
+}

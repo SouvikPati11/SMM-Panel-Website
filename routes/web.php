@@ -12,6 +12,7 @@ use App\Controllers\Webhook\WebhookController;
 $router->get('/sitemap.xml', [PageController::class, 'sitemap'], 'sitemap', ['stateless']);
 $router->get('/robots.txt', [PageController::class, 'robots'], 'robots', ['stateless']);
 $router->post('/webhooks/{gateway}', [WebhookController::class, 'handle'], 'webhook', ['stateless']);
+$router->get('/tasks/run/{token}', [App\Controllers\Public\CronController::class, 'run'], 'cron.http', ['stateless']);
 
 // ------------------------------------------------------------------ public website
 $router->group(['middleware' => ['maintenance', 'csrf']], static function ($router) {

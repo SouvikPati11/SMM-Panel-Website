@@ -38,6 +38,7 @@ final class View
         while ($this->layout !== null && $guard++ < 5) {
             $layout = $this->layout;
             $this->layout = null;
+            $data = array_merge(self::$shared, $data);
             $data['content'] = $content;
             $content = $this->capture($layout, $data);
         }

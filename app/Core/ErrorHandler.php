@@ -23,6 +23,11 @@ final class ErrorHandler
             if (!(error_reporting() & $severity)) {
                 return false;
             }
+            // Deprecations must never break a live site (e.g. after a host PHP upgrade): log only.
+            if (in_array($severity, [E_DEPRECATED, E_USER_DEPRECATED], true)) {
+                Logger::warning('Deprecated: ' . $message, ['file' => $file, 'line' => $line]);
+                return true;
+            }
             throw new \ErrorException($message, 0, $severity, $file, $line);
         });
 

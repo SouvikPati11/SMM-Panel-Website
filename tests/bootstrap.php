@@ -41,6 +41,7 @@ $db->pdo()->exec((string) file_get_contents(BASE_PATH . '/database/schema.sql'))
 App\Install\Seeder::run();
 App\Services\SettingsService::flush();
 App\Services\SettingsService::set('mail_driver', 'array');
+App\Core\App::$forceInstalled = true;
 
 // ---------------------------------------------------------------- tiny test framework
 final class T
@@ -55,6 +56,7 @@ final class T
         App\Core\HttpClient::fake(null);
         App\Services\Auth::reset();
         $_SESSION = [];
+        App\Core\HttpClient::fake(null);
         try {
             $fn();
             self::$pass++;
@@ -196,4 +198,29 @@ final class Fx
     {
         return new App\Core\HttpResponse($status, json_encode($data), 5);
     }
+}
+
+/** Dispatch a request through the full HTTP kernel (routing, middleware, controllers, views). */
+function http(string $method, string $path, array $params = [], array $server = [], ?string $raw = null): App\Core\Response
+{
+    App\Services\Auth::reset();
+    $req = App\Core\Request::create($method, $path, $params, $server + ['REMOTE_ADDR' => '198.51.100.7', 'HTTP_HOST' => 'panel.test'], $raw);
+    return App\Core\App::handle($req);
+}
+
+function login_as_user(array $user): void
+{
+    $_SESSION['user_id'] = (int) $user['id'];
+    $_SESSION['user_sv'] = (int) App\Core\Database::instance()->fetchColumn('SELECT session_version FROM users WHERE id = ?', [$user['id']]);
+}
+
+function login_as_admin(int $adminId): void
+{
+    $_SESSION['admin_id'] = $adminId;
+    $_SESSION['admin_sv'] = (int) App\Core\Database::instance()->fetchColumn('SELECT session_version FROM admins WHERE id = ?', [$adminId]);
+}
+
+function csrf(): string
+{
+    return App\Core\Csrf::token();
 }

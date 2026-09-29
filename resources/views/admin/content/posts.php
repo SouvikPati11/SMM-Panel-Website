@@ -1,0 +1,13 @@
+<?php $this->extend('layouts/admin'); use App\Helpers\Form; ?>
+<div class="page-head"><div><h1>Blog</h1></div><a class="btn btn-primary" href="<?= e(admin_url('blog/create')) ?>"><?= icon('plus') ?> New post</a></div>
+<div class="grid-main">
+  <div class="card"><div class="table-wrap"><table class="table table-cards"><thead><tr><th>Title</th><th>Category</th><th>Status</th><th class="num">Views</th><th>Published</th></tr></thead><tbody>
+  <?php foreach ($posts->items as $p): ?><tr><td class="cell-main"><a class="cell-title" href="<?= e(admin_url('blog/' . $p['id'] . '/edit')) ?>"><?= e($p['title']) ?></a><div class="cell-sub">/blog/<?= e($p['slug']) ?></div></td><td data-label="Category"><?= e($p['category'] ?: '—') ?></td><td data-label="Status"><?= status_badge($p['status']) ?></td><td data-label="Views" class="num"><?= number_format((int) $p['views']) ?></td><td data-label="Published" class="text-sm"><?= e(fmt_date($p['published_at'], 'M j, Y')) ?></td></tr><?php endforeach ?>
+  <?php if (!$posts->items): ?><tr><td colspan="5" class="text-center text-muted" style="padding:28px">No posts yet.</td></tr><?php endif ?></tbody></table></div><?= $posts->links(\App\Core\App::request()) ?></div>
+  <div class="card"><div class="card-header"><h2>Categories</h2><button class="btn btn-ghost btn-sm" type="button" data-open-dialog="bc-dialog" data-reset><?= icon('plus') ?></button></div>
+    <ul class="list-plain list-rows"><?php foreach ($cats as $c): ?><li><span><?= e($c['name']) ?> <span class="text-muted text-xs">(<?= (int) $c['n'] ?>)</span></span><span class="flex gap-1"><button class="btn btn-ghost btn-sm" type="button" data-open-dialog="bc-dialog" data-fill="<?= json_attr(['id' => $c['id'], 'name' => $c['name'], 'slug' => $c['slug']]) ?>"><?= icon('edit') ?></button><form method="post" action="<?= e(admin_url('blog/categories/' . $c['id'] . '/delete')) ?>" data-confirm="Delete category?"><?= csrf_field() ?><button class="btn btn-ghost btn-sm" type="submit"><?= icon('trash') ?></button></form></span></li><?php endforeach ?>
+    <?php if (!$cats): ?><li class="text-muted">No categories.</li><?php endif ?></ul></div>
+</div>
+<dialog class="modal" id="bc-dialog"><div class="modal-head"><h3>Blog category</h3><button class="btn btn-ghost btn-icon btn-sm" type="button" data-close-dialog><?= icon('x') ?></button></div><div class="modal-body">
+  <form method="post" action="<?= e(admin_url('blog/categories/save')) ?>"><?= csrf_field() ?><input type="hidden" name="id" value=""><?= Form::input('name', 'Name', '', ['required' => true]) ?><?= Form::input('slug', 'Slug', '') ?><button class="btn btn-primary btn-block" type="submit">Save</button></form>
+</div></dialog>

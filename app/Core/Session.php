@@ -31,8 +31,10 @@ final class Session
         ini_set('session.use_strict_mode', '1');
         ini_set('session.use_only_cookies', '1');
         ini_set('session.use_trans_sid', '0');
-        ini_set('session.sid_length', '48');
-        ini_set('session.sid_bits_per_character', '6');
+        if (PHP_VERSION_ID < 80400) { // deprecated (and defaults are strong) from PHP 8.4
+            ini_set('session.sid_length', '48');
+            ini_set('session.sid_bits_per_character', '6');
+        }
         ini_set('session.gc_maxlifetime', (string) Config::get('session.lifetime', 7200));
 
         $basePath = rtrim((string) parse_url((string) Config::get('url', ''), PHP_URL_PATH), '/');

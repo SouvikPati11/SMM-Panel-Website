@@ -1,0 +1,30 @@
+# ---------------------------------------------------------------------------
+# Root .htaccess — used when the WHOLE project is uploaded into public_html.
+# Best practice: point the domain's document root at /public instead
+# (cPanel → Domains → Document Root). This file then acts as a safety net.
+# ---------------------------------------------------------------------------
+Options -Indexes -MultiViews
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Deny direct access to application internals, secrets and tooling
+    RewriteRule ^(app|config|database|routes|resources|storage|cron|tests|docs|vendor|install)(/|$) - [F,L]
+    RewriteRule (^|/)\.(?!well-known/) - [F,L]
+    RewriteRule \.(env|sql|log|md|lock|json|dist|sh|ini|bak|yml|yaml|xml\.dist)$ - [F,L,NC]
+    RewriteRule ^composer\.(json|lock)$ - [F,L]
+
+    # Serve everything from /public
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+<FilesMatch "^\.">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

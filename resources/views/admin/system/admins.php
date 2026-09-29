@@ -1,0 +1,16 @@
+<?php $this->extend('layouts/admin'); use App\Helpers\Form; ?>
+<div class="page-head"><div><h1>Administrators</h1></div><div class="btn-group"><a class="btn btn-secondary" href="<?= e(admin_url('roles')) ?>"><?= icon('shield') ?> Roles & permissions</a><button class="btn btn-primary" type="button" data-open-dialog="adm-dialog" data-reset><?= icon('plus') ?> Add admin</button></div></div>
+<div class="card"><div class="table-wrap"><table class="table table-cards"><thead><tr><th>User</th><th>Roles</th><th>2FA</th><th>Status</th><th>Last login</th><th></th></tr></thead><tbody>
+<?php foreach ($admins as $a): ?><tr><td class="cell-main"><span class="cell-title"><?= e($a['username']) ?></span><?= (int) $a['is_super'] ? ' <span class="badge badge-purple no-dot">super</span>' : '' ?><div class="cell-sub"><?= e($a['email']) ?></div></td>
+  <td data-label="Roles" class="text-sm"><?= e($a['roles'] ?: '—') ?></td><td data-label="2FA"><?= (int) $a['twofa_enabled'] ? status_badge('active') : '<span class="badge badge-warning">Off</span>' ?></td><td data-label="Status"><?= status_badge($a['status']) ?></td><td data-label="Last login" class="text-sm"><?= e(time_ago($a['last_login_at'])) ?> <span class="mono text-xs"><?= e($a['last_login_ip'] ?? '') ?></span></td>
+  <td class="actions"><button class="btn btn-ghost btn-sm" type="button" data-open-dialog="adm-dialog" data-fill="<?= json_attr(['id' => $a['id'], 'username' => $a['username'], 'email' => $a['email'], 'name' => $a['name'], 'status' => $a['status'], 'is_super' => $a['is_super'], 'roles' => array_filter(explode(',', (string) $a['role_ids']))]) ?>"><?= icon('edit') ?></button>
+    <?php if ((int) $a['id'] !== (int) auth_admin()['id']): ?><form class="inline-form" method="post" action="<?= e(admin_url('admins/' . $a['id'] . '/delete')) ?>" data-confirm="Delete administrator <?= e($a['username']) ?>?"><?= csrf_field() ?><button class="btn btn-ghost btn-sm" type="submit"><?= icon('trash') ?></button></form><?php endif ?></td></tr>
+<?php endforeach ?></tbody></table></div></div>
+<dialog class="modal" id="adm-dialog"><div class="modal-head"><h3>Administrator</h3><button class="btn btn-ghost btn-icon btn-sm" type="button" data-close-dialog><?= icon('x') ?></button></div><div class="modal-body">
+  <form method="post" action="<?= e(admin_url('admins/save')) ?>"><?= csrf_field() ?><input type="hidden" name="id" value="">
+    <div class="form-grid"><?= Form::input('username', 'Username', '', ['required' => true]) ?><?= Form::input('email', 'Email', '', ['type' => 'email', 'required' => true]) ?><?= Form::input('name', 'Display name', '') ?><?= Form::select('status', 'Status', ['active' => 'Active', 'disabled' => 'Disabled'], 'active') ?></div>
+    <?= Form::input('password', 'Password', '', ['type' => 'password', 'autocomplete' => 'new-password', 'hint' => 'Required for new admins; leave empty to keep.']) ?>
+    <div class="field"><div class="label">Roles</div><?php foreach ($roles as $rid => $rn): ?><?= Form::check('roles[]', e($rn), false, (string) $rid) ?><?php endforeach ?></div>
+    <div class="field"><?= Form::check('is_super', 'Super admin (all permissions)', false) ?></div>
+    <button class="btn btn-primary btn-block" type="submit">Save</button></form>
+</div></dialog>

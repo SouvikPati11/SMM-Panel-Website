@@ -119,6 +119,11 @@ final class PaymentService
             throw new ValidationException($e->userMessage);
         }
 
+        if (!preg_match('#^https://[^\s"<>]+$#i', $init->redirectUrl)) {
+            $db->update('payments', ['status' => 'failed', 'meta' => json_encode(['error' => 'Gateway returned a non-HTTPS payment URL']), 'updated_at' => now()], ['id' => $paymentId]);
+            Logger::error('Gateway returned invalid payment URL', ['payment' => $paymentId], 'payment');
+            throw new ValidationException('The payment gateway returned an invalid response. Please try another method.');
+        }
         $db->update('payments', [
             'gateway_ref' => $init->gatewayRef,
             'pay_url' => $init->redirectUrl,

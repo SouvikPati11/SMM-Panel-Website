@@ -1,0 +1,25 @@
+<?php $this->extend('layouts/admin'); ?>
+<div class="page-head"><div><h1>Logs</h1></div></div>
+<div class="tabs"><?php foreach (['audit' => 'Audit trail', 'api' => 'Reseller API', 'webhook' => 'Payment webhooks', 'login' => 'Logins', 'files' => 'Application logs'] as $k => $l): ?><a class="<?= $type === $k ? 'active' : '' ?>" href="<?= e(admin_url('logs?type=' . $k)) ?>"><?= $l ?></a><?php endforeach ?><a href="<?= e(admin_url('providers/logs')) ?>">Provider API</a></div>
+<?php if (in_array($type, ['audit', 'login'], true)): ?><form class="toolbar" method="get" action="<?= e(admin_url('logs')) ?>"><input type="hidden" name="type" value="<?= e($type) ?>"><input class="input" type="search" name="q" value="<?= e($q) ?>" placeholder="<?= $type === 'audit' ? 'Action or target ID' : 'Identifier or IP' ?>"><button class="btn btn-secondary" type="submit"><?= icon('search') ?></button></form><?php endif ?>
+<?php if ($type === 'files'): ?>
+  <div class="card"><div class="card-header"><form method="get" action="<?= e(admin_url('logs')) ?>" class="flex gap-1"><input type="hidden" name="type" value="files"><select class="select" name="file" data-autosubmit style="width:auto"><?php foreach ($files as $f): ?><option<?= $f === $file ? ' selected' : '' ?>><?= e($f) ?></option><?php endforeach ?></select></form></div>
+  <div class="card-body"><?php if ($content === ''): ?><p class="text-muted">No log files.</p><?php else: ?><pre style="max-height:70vh;font-size:12px"><code><?= e($content) ?></code></pre><?php endif ?></div></div>
+<?php else: ?>
+<div class="card"><div class="table-wrap"><table class="table table-cards">
+<?php if ($type === 'audit'): ?>
+  <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Details</th><th>IP</th></tr></thead><tbody>
+  <?php foreach ($rows->items as $l): ?><tr><td data-label="Time" class="text-sm nowrap"><?= e(fmt_date($l['created_at'], 'M j H:i:s')) ?></td><td data-label="Actor"><?= e($l['actor_type']) ?>: <?= e($l['actor'] ?? '#' . $l['actor_id']) ?></td><td class="cell-main mono text-sm"><?= e($l['action']) ?></td><td data-label="Target" class="text-sm"><?= e(trim(($l['target_type'] ?? '') . ' ' . ($l['target_id'] ?? ''))) ?></td><td data-label="Details" class="mono text-xs break" style="max-width:380px"><?= e(str_limit($l['details'], 300)) ?></td><td data-label="IP" class="mono text-xs"><?= e($l['ip']) ?></td></tr><?php endforeach ?>
+<?php elseif ($type === 'api'): ?>
+  <thead><tr><th>Time</th><th>User</th><th>Action</th><th>HTTP</th><th>Request</th><th>Response</th><th>IP</th><th class="num">ms</th></tr></thead><tbody>
+  <?php foreach ($rows->items as $l): ?><tr><td data-label="Time" class="text-sm nowrap"><?= e(fmt_date($l['created_at'], 'M j H:i:s')) ?></td><td data-label="User"><?= e($l['username'] ?? '—') ?></td><td data-label="Action" class="mono"><?= e($l['action']) ?></td><td data-label="HTTP"><?= (int) $l['http_status'] ?></td><td data-label="Request" class="mono text-xs break" style="max-width:240px"><?= e(str_limit($l['request'], 160)) ?></td><td data-label="Response" class="mono text-xs break" style="max-width:280px"><?= e(str_limit($l['response'], 200)) ?></td><td data-label="IP" class="mono text-xs"><?= e($l['ip']) ?></td><td data-label="ms" class="num"><?= (int) $l['duration_ms'] ?></td></tr><?php endforeach ?>
+<?php elseif ($type === 'webhook'): ?>
+  <thead><tr><th>Time</th><th>Gateway</th><th>Signature</th><th>Payment</th><th>Result</th><th>Payload</th><th>IP</th></tr></thead><tbody>
+  <?php foreach ($rows->items as $l): ?><tr><td data-label="Time" class="text-sm nowrap"><?= e(fmt_date($l['created_at'], 'M j H:i:s')) ?></td><td data-label="Gateway"><?= e($l['gateway']) ?></td><td data-label="Signature"><?= (int) $l['signature_valid'] ? status_badge('ok') : '<span class="badge badge-danger">invalid</span>' ?></td><td data-label="Payment"><?= $l['payment_id'] ? '#' . (int) $l['payment_id'] : '—' ?></td><td class="cell-main text-sm"><?= e($l['result']) ?></td><td data-label="Payload" class="mono text-xs break" style="max-width:340px"><?= e(str_limit($l['payload'], 260)) ?></td><td data-label="IP" class="mono text-xs"><?= e($l['ip']) ?></td></tr><?php endforeach ?>
+<?php else: ?>
+  <thead><tr><th>Time</th><th>Guard</th><th>Identifier</th><th>IP</th><th>Result</th><th>Browser</th></tr></thead><tbody>
+  <?php foreach ($rows->items as $l): ?><tr><td data-label="Time" class="text-sm nowrap"><?= e(fmt_date($l['created_at'], 'M j H:i:s')) ?></td><td data-label="Guard"><?= e($l['guard']) ?></td><td class="cell-main"><?= e($l['identifier']) ?></td><td data-label="IP" class="mono text-xs"><?= e($l['ip']) ?></td><td data-label="Result"><?= (int) $l['success'] ? status_badge('success') : status_badge('failed') ?></td><td data-label="Browser" class="text-xs"><?= e(str_limit($l['user_agent'], 60)) ?></td></tr><?php endforeach ?>
+<?php endif ?>
+<?php if (!$rows->items): ?><tr><td colspan="8" class="text-center text-muted" style="padding:28px">No entries.</td></tr><?php endif ?>
+</tbody></table></div><?= $rows->links(\App\Core\App::request()) ?></div>
+<?php endif ?>

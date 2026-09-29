@@ -150,6 +150,7 @@ legend { padding: 0 6px; font-weight: 700; font-size: 14px; }
 .card-sub { color: var(--muted); font-size: 13.5px; margin: 0; }
 
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+.stats-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; display: flex; gap: 14px; align-items: flex-start; box-shadow: var(--shadow-sm); min-width: 0; }
 .stat-icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--primary-50); color: var(--primary); flex-shrink: 0; }
 .stat-icon.success { background: var(--success-50); color: var(--success); }
@@ -514,6 +515,7 @@ dialog.modal::backdrop { background: rgba(10, 12, 25, .55); backdrop-filter: blu
   .stats { gap: 12px; }
   .stat { padding: 14px; flex-direction: column; gap: 10px; }
   .stat-value { font-size: 1.2rem; }
+  .stats-3 { grid-template-columns: minmax(0, 1fr); }
   .stat-icon { width: 36px; height: 36px; }
   .grid-2, .grid-3, .form-grid { grid-template-columns: minmax(0, 1fr); }
   .form-grid .span-2 { grid-column: auto; }

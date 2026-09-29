@@ -1,0 +1,31 @@
+{
+    "name": "smm-panel/smm-panel",
+    "description": "Self-hosted SMM reseller panel for PHP 8.1+ / MySQL shared hosting",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.1",
+        "ext-pdo_mysql": "*",
+        "ext-mbstring": "*",
+        "ext-json": "*",
+        "ext-curl": "*",
+        "ext-openssl": "*",
+        "ext-fileinfo": "*",
+        "ext-sodium": "*",
+        "ext-dom": "*"
+    },
+    "suggest": {
+        "ext-bcmath": "Faster exact decimal arithmetic (a pure-PHP fallback is built in)",
+        "ext-gd": "Re-encodes uploaded images to strip hidden payloads",
+        "ext-intl": "Better slugs for non-Latin titles"
+    },
+    "autoload": {
+        "psr-4": { "App\\": "app/" },
+        "files": ["app/Helpers/functions.php"]
+    },
+    "scripts": {
+        "test": "php tests/run.php",
+        "lint": "find app routes config cron public resources tests -name '*.php' -print0 | xargs -0 -n1 php -l"
+    },
+    "config": { "optimize-autoloader": true, "sort-packages": true }
+}

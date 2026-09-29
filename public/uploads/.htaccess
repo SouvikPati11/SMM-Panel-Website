@@ -1,6 +1,6 @@
 # Uploaded files must never execute as code.
 Options -Indexes -ExecCGI
-<FilesMatch "\.(php\d?|phtml|phar|pl|py|cgi|sh|asp|aspx|jsp|htaccess)$">
+<FilesMatch "(?i)\.(php\d?|phtml|phar|pl|py|cgi|sh|asp|aspx|jsp|htaccess)$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>

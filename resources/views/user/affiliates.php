@@ -4,7 +4,7 @@
   <div class="label">Your referral link</div>
   <div class="copy-box"><span><?= e($link) ?></span><button class="btn btn-primary btn-sm" type="button" data-copy="<?= e($link) ?>"><?= icon('copy') ?> <span class="copy-label">Copy link</span></button></div>
 </div></div>
-<div class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+<div class="stats stats-3">
   <div class="stat"><div class="stat-icon info"><?= icon('users') ?></div><div><div class="stat-label">Referrals</div><div class="stat-value"><?= number_format($stats['referrals']) ?></div></div></div>
   <div class="stat"><div class="stat-icon success"><?= icon('trend') ?></div><div><div class="stat-label">Total earned</div><div class="stat-value"><?= e(money($stats['earned'])) ?></div></div></div>
   <div class="stat"><div class="stat-icon"><?= icon('wallet') ?></div><div><div class="stat-label">Available</div><div class="stat-value"><?= e(money($stats['available'])) ?></div>

@@ -118,8 +118,8 @@ install/                   web installer (locked after install)
 ```
 
 ### 2.3 Money
-All money columns are `DECIMAL(18,6)` (rates, charges) / `DECIMAL(18,4)`
-where appropriate. PHP never uses floats for money: `App\Core\Money` performs
+Money columns are `DECIMAL(18,6)` for balances, rates and charges and
+`DECIMAL(18,4)` for payment amounts. PHP never uses floats for money: `App\Core\Money` performs
 decimal-string arithmetic (bcmath when available, a pure-PHP exact fallback
 otherwise). Balance changes are applied by SQL on a row locked with
 `SELECT … FOR UPDATE`, and every change writes a ledger row in `transactions`
@@ -160,7 +160,7 @@ See `database/schema.sql` (authoritative). Tables:
 
 `users, wallets, transactions, price_levels, admins, roles, permissions,
 role_permissions, admin_roles, password_resets, email_verifications, login_attempts,
-user_sessions, categories, services, providers, provider_services, orders, order_logs,
+categories, services, providers, provider_services, orders, order_logs,
 refills, payments, payment_methods, manual_payment_requests, coupons, coupon_usage,
 referrals, referral_transactions, tickets, ticket_messages, ticket_attachments,
 notifications, announcements, pages, faqs, blog_categories, blog_posts, blog_tags,

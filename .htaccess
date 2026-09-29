@@ -9,10 +9,10 @@ Options -Indexes -MultiViews
     RewriteEngine On
 
     # Deny direct access to application internals, secrets and tooling
-    RewriteRule ^(app|config|database|routes|resources|storage|cron|tests|docs|vendor|install)(/|$) - [F,L]
-    RewriteRule (^|/)\.(?!well-known/) - [F,L]
+    RewriteRule ^(app|config|database|routes|resources|storage|cron|tests|docs|vendor|install)(/|$) - [F,L,NC]
+    RewriteRule (^|/)\.(?!well-known/) - [F,L,NC]
     RewriteRule \.(env|sql|log|md|lock|json|dist|sh|ini|bak|yml|yaml|xml\.dist)$ - [F,L,NC]
-    RewriteRule ^composer\.(json|lock)$ - [F,L]
+    RewriteRule ^composer\.(json|lock)$ - [F,L,NC]
 
     # Serve everything from /public
     RewriteCond %{REQUEST_URI} !^/public/

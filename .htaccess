@@ -1,24 +1,57 @@
 # ---------------------------------------------------------------------------
-# Root .htaccess — used when the WHOLE project is uploaded into public_html.
-# Best practice: point the domain's document root at /public instead
-# (cPanel → Domains → Document Root). This file then acts as a safety net.
+# Root .htaccess — used when the web server's document root is the repository
+# root, e.g. Hostinger Git deployment into public_html (the default).
+#
+# Everything here is SINGLE-PASS on purpose: it must not rely on
+# public/.htaccess being evaluated after an internal rewrite. LiteSpeed (used
+# by Hostinger) treats [L] like [END] and does not re-run the rewrite rules of
+# the target sub-directory, so a plain "rewrite everything to public/$1" gives
+# 404 for every route there. Instead:
+#   - static files are mapped to public/assets and public/uploads,
+#   - every other request goes to ./index.php, which loads public/index.php.
+#
+# If you can point the domain's document root at /public instead, this file is
+# simply not used (public/.htaccess takes over). Both layouts are supported.
 # ---------------------------------------------------------------------------
 Options -Indexes -MultiViews
+DirectoryIndex index.php
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
-    # Deny direct access to application internals, secrets and tooling
-    RewriteRule ^(app|config|database|routes|resources|storage|cron|tests|docs|vendor|install)(/|$) - [F,L,NC]
-    RewriteRule (^|/)\.(?!well-known/) - [F,L,NC]
-    RewriteRule \.(env|sql|log|md|lock|json|dist|sh|ini|bak|yml|yaml|xml\.dist)$ - [F,L,NC]
-    RewriteRule ^composer\.(json|lock)$ - [F,L,NC]
+    # Uncomment to force HTTPS (or set FORCE_HTTPS=true in .env):
+    # RewriteCond %{HTTPS} !=on
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
-    # Serve everything from /public
-    RewriteCond %{REQUEST_URI} !^/public/
-    RewriteRule ^(.*)$ public/$1 [L]
+    # The front controller itself (also stops Apache's second rewrite pass).
+    RewriteRule ^index\.php$ - [L]
+
+    # --- Never serve application internals, secrets or tooling ------------
+    RewriteRule ^(app|config|database|routes|resources|storage|cron|tests|docs|vendor|node_modules)(/|$) - [F,L,NC]
+    # Hidden files and directories (.env, .git, .htaccess …) except ACME validation
+    RewriteRule (^|/)\.(?!well-known/) - [F,L,NC]
+    RewriteRule \.(env|sql|log|md|lock|json|dist|sh|ini|bak|swp|yml|yaml|phar)$ - [F,L,NC]
+    # Uploaded files must never execute or be served as scripts
+    RewriteRule ^(public/)?uploads/.*\.(php\d?|phtml|pht|phps|phar|pl|py|cgi|sh|asp|aspx|jsp|shtml|htaccess)$ - [F,L,NC]
+
+    # --- Canonical URLs: /public/... → /... (only for client requests) ----
+    RewriteCond %{THE_REQUEST} \s/+public(/|\s|\?) [NC]
+    RewriteRule ^public(?:/(.*))?$ /$1 [R=301,L,NE]
+
+    # --- Static files live in public/ ---------------------------------------
+    RewriteCond %{REQUEST_URI} !/public/
+    RewriteRule ^(assets|uploads)/(.+)$ public/$1/$2 [L]
+
+    # --- Everything else → front controller ---------------------------------
+    RewriteRule ^ index.php [L]
 </IfModule>
 
+# Pass the Authorization header through to PHP (some hosts strip it)
+<IfModule mod_setenvif.c>
+    SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+</IfModule>
+
+# Fallback when mod_rewrite is unavailable: deny hidden files at least
 <FilesMatch "^\.">
     <IfModule mod_authz_core.c>
         Require all denied
@@ -28,3 +61,15 @@ Options -Indexes -MultiViews
         Deny from all
     </IfModule>
 </FilesMatch>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always unset X-Powered-By
+    <FilesMatch "\.(css|js|svg|png|jpe?g|webp|gif|ico|woff2?)$">
+        Header set Cache-Control "public, max-age=2592000"
+    </FilesMatch>
+</IfModule>
+
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json image/svg+xml text/plain application/xml
+</IfModule>

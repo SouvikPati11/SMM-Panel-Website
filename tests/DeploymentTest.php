@@ -52,6 +52,58 @@ T::test('Deploy: bootstrap still refuses to run when a required extension is mis
     }
 });
 
+/** The root .htaccess deny rules ("RewriteRule <regex> - [F…]") as PCRE patterns. */
+$rootDenyRules = static function (): array {
+    preg_match_all('/^\s*RewriteRule\s+(\S+)\s+-\s+\[F[^\]]*\]/m', (string) file_get_contents(BASE_PATH . '/.htaccess'), $m);
+    return array_map(static fn (string $re): string => '~' . str_replace('~', '\~', $re) . '~i', $m[1]);
+};
+$deniedAtRoot = static function (string $path) use ($rootDenyRules): bool {
+    foreach ($rootDenyRules() as $re) {
+        if (preg_match($re, $path)) {
+            return true;
+        }
+    }
+    return false;
+};
+
+T::test('Deploy (public_html = repo root): front controller routing is single-pass, no nested .htaccess needed', function () {
+    $ht = (string) file_get_contents(BASE_PATH . '/.htaccess');
+    $index = (string) file_get_contents(BASE_PATH . '/index.php');
+    T::true(str_contains($index, "require __DIR__ . '/public/index.php';"), 'root index.php delegates to public/index.php');
+    T::true((bool) preg_match('~^\s*RewriteRule \^\(assets\|uploads\)/\(\.\+\)\$ public/\$1/\$2 \[L\]~m', $ht), 'static files mapped into public/');
+    T::true((bool) preg_match('~^\s*RewriteRule \^ index\.php \[L\]\s*$~m', $ht), 'everything else → root index.php');
+    T::true((bool) preg_match('~^\s*RewriteRule \^index\\\\\.php\$ - \[L\]~m', $ht), 'front controller short-circuits the second pass');
+    // The old catch-all relied on public/.htaccess being re-evaluated (404 on LiteSpeed/Hostinger).
+    T::true(!preg_match('~RewriteRule\s+\^\(\.\*\)\$\s+public/\$1~', $ht), 'no "rewrite everything to public/$1"');
+    T::true(!preg_match('~RewriteRule\s+\^\([^)]*\binstall\b~i', $ht), '/install is an application route and must not be blocked (was a 403)');
+});
+
+T::test('Deploy (public_html = repo root): every non-public top-level entry is denied, routes are not', function () use ($deniedAtRoot) {
+    $public = ['index.php', 'public', '.htaccess'];
+    foreach (scandir(BASE_PATH) ?: [] as $entry) {
+        if (in_array($entry, ['.', '..'], true) || in_array($entry, $public, true)) {
+            continue;
+        }
+        // Local-only artifacts (vendor/, .env, .git …) must be denied too if they exist.
+        $probe = is_dir(BASE_PATH . '/' . $entry) ? $entry . '/x' : $entry;
+        T::true($deniedAtRoot($probe), "/{$probe} must be denied by the root .htaccess");
+    }
+    foreach (['.env', '.git/config', 'vendor/autoload.php', 'storage/installed.lock', 'storage/logs/app.log', 'database/schema.sql', 'composer.lock', 'uploads/a.php', 'public/uploads/a.PHTML', 'public/.htaccess'] as $secret) {
+        T::true($deniedAtRoot($secret), "/{$secret} must be denied");
+    }
+    foreach (['', 'install', 'install/database', 'login', 'admin/login', 'dashboard', 'api/v2', 'webhooks/p2gateway', 'tasks/run/abc', 'robots.txt', 'sitemap.xml', 'assets/css/app.css', 'uploads/qr/2026/09/a.png', '.well-known/acme-challenge/t', 'index.php'] as $route) {
+        T::true(!$deniedAtRoot($route), "/{$route} must not be denied");
+    }
+});
+
+T::test('Deploy (document root = public/): public/.htaccess keeps routing and protections', function () {
+    $ht = (string) file_get_contents(BASE_PATH . '/public/.htaccess');
+    T::true(str_contains($ht, 'RewriteRule ^ index.php [L]'), 'front controller');
+    T::true(str_contains($ht, 'RewriteCond %{REQUEST_FILENAME} -f'), 'real files served directly');
+    $up = (string) file_get_contents(BASE_PATH . '/public/uploads/.htaccess');
+    T::true(str_contains($up, 'php_flag engine off') && str_contains($up, 'Require all denied'), 'uploads never execute');
+});
+
 T::test('Deploy: bootstrap tolerates helpers already loaded by a Composer autoloader', function () use ($php) {
     $code = 'require ' . var_export(BASE_PATH . '/app/Helpers/functions.php', true) . '; require ' . var_export(BASE_PATH . '/app/bootstrap.php', true) . '; echo function_exists("e") && class_exists("App\\\\Core\\\\Money") ? "BOOTED" : "NO";';
     [, $exit, $out] = $php('-r ' . escapeshellarg($code));

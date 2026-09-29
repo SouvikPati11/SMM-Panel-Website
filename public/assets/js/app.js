@@ -309,7 +309,8 @@
       var id = sel ? sel.value : '';
       var gateway = sel ? sel.getAttribute('data-gateway') : '';
       $$('.method-panel').forEach(function (p) { p.hidden = p.getAttribute('data-method') !== id; });
-      $('#gateway-form').hidden = !sel || gateway === 'manual';
+      var gwForm = $('#gateway-form'); // absent when no payment method is active yet
+      if (gwForm) gwForm.hidden = !sel || gateway === 'manual';
       $$('[data-for-gateway]').forEach(function (f) {
         var on = f.getAttribute('data-for-gateway') === gateway;
         f.hidden = !on;

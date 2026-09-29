@@ -80,13 +80,24 @@ step) works the same way.
 - **Hostinger**: hPanel → Websites → Manage → Databases → *MySQL Databases* → create database + user (note the `u123_` prefixes).
 - **cPanel**: *MySQL® Databases* → create database, create user, **Add user to database** with *ALL PRIVILEGES*.
 
-### 2. Upload the files
-Download the project (ZIP of this repository) and upload it:
+### 2. Deploy the files
+Two layouts are supported, and both work without moving files after a deploy:
 
-- **Recommended**: upload to a folder *next to* `public_html` (e.g. `/home/USER/smmpanel`) and set the domain's **document root** to `/home/USER/smmpanel/public` (cPanel → Domains → Manage → *Document Root*; Hostinger: upload into `public_html` and use option B, or ask support to change the root).
-- **Option B (simplest, works everywhere)**: upload **everything** into `public_html`. The root `.htaccess` sends all traffic to `/public` and returns 403 for `.env`, `app/`, `config/`, `storage/`, `cron/`, `database/`, dotfiles, etc.
+- **A. Repository root = web root (Hostinger Git default).** hPanel →
+  Websites → Manage → **Advanced → Git** → repository + branch, and leave
+  *Install path* empty so the site deploys into `public_html`. Every push then
+  deploys directly and the site works.
+  - The root `.htaccess` serves `public/assets` and `public/uploads` as `/assets/…` and `/uploads/…`.
+  - Every other request goes to the root `index.php` front controller, which loads `public/index.php`.
+  - It returns 403 for `.env`, `.git`, `app/`, `config/`, `storage/`, `cron/`, `database/`, `routes/`, `resources/`, `tests/`, `docs/`, `vendor/`, dotfiles, `*.md`, `*.json`, `*.lock` and any script in `uploads/`.
+  - It is single-pass: LiteSpeed (Hostinger) does not re-run the rewrite rules of a subdirectory after a rewrite, so the configuration does not rely on `public/.htaccess`.
+- **B. Document root = `public/` (recommended where the host allows it).**
+  Set the domain's document root to `…/public` (cPanel → Domains → Manage →
+  *Document Root*). Nothing outside `public/` is then reachable at all, and
+  `public/.htaccess` handles routing.
 
-Use File Manager → Upload ZIP → Extract, then make sure hidden files (`.htaccess`) were extracted.
+For a manual upload instead of Git, use File Manager → Upload ZIP → Extract into
+`public_html`, then make sure hidden files (`.htaccess`) were extracted.
 
 ### 3. Select the PHP version
 Hostinger: *Advanced → PHP Configuration* → 8.2/8.3. cPanel: *Select PHP Version* / *MultiPHP Manager* → 8.2+. Enable the extensions listed above if any are off.
@@ -367,7 +378,7 @@ php tests/run.php            # all suites
 php tests/run.php Payment    # one suite
 ```
 
-The suite drops and recreates every table in the test database, then runs 122
+The suite drops and recreates every table in the test database, then runs 125
 integration tests through the real services and the full HTTP kernel, with a
 fake HTTP transport standing in for providers and gateways:
 
@@ -416,6 +427,7 @@ and database backed up · `TRUSTED_PROXIES` set if you use Cloudflare.
 | Symptom | Fix |
 |---|---|
 | Blank page / 500 | See `storage/logs/app-YYYY-MM-DD.log`. Temporarily set `APP_DEBUG=true` (never leave it on). Check the PHP version is 8.1+. |
+| 404 on every page / 403 on `/install` after a Git deploy into `public_html` | The site is running an older root `.htaccess` (before `index.php` existed at the repository root). Redeploy the latest commit, and check that `public_html/.htaccess` and `public_html/index.php` are present. |
 | "requires these PHP extensions, which are not enabled" | Enable the named extensions for the **web** PHP version (Hostinger: Advanced → PHP Configuration → PHP extensions). |
 | Hostinger Git deploy fails at the Composer step | Make sure `composer.json` and `composer.lock` from this repository are deployed unchanged. They declare no platform requirements. The app does not need Composer at all. |
 | 404 on every page except home | `mod_rewrite`/`.htaccess` not active, or `.htaccess` files were not uploaded (hidden files). |

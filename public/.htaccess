@@ -12,6 +12,11 @@ DirectoryIndex index.php
     # Block hidden files except .well-known (ACME / SSL validation)
     RewriteRule (^|/)\.(?!well-known/) - [F,L]
 
+    # Repo-root deployments (Hostinger public_html): a client asking for
+    # /public/... directly is sent to the canonical URL without /public.
+    RewriteCond %{THE_REQUEST} \s/+public(/|\s|\?) [NC]
+    RewriteRule ^(.*)$ /$1 [R=301,L,NE]
+
     # Real files (CSS, JS, images, uploads) are served directly
     RewriteCond %{REQUEST_FILENAME} -f
     RewriteRule ^ - [L]

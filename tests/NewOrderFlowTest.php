@@ -91,7 +91,7 @@ T::test('Quote: validation errors come back as JSON 422; low balance is flagged,
     login_as_user($u);
     $bad = http('POST', '/order/quote', ['_token' => csrf(), 'service' => (string) $nfService, 'link' => 'https://instagram.com/nf', 'quantity' => '5'], $nfJson);
     T::eq(422, $bad->status());
-    T::true(str_contains((string) json_decode($bad->body(), true)['error'], 'Quantity must be between'));
+    T::true(str_contains((string) json_decode($bad->body(), true)['error'], 'Enter a quantity between'));
     $low = json_decode(http('POST', '/order/quote', ['_token' => csrf(), 'service' => (string) $nfService, 'link' => 'https://instagram.com/nf', 'quantity' => '1000'], $nfJson)->body(), true);
     T::eq(true, $low['insufficient']);
     T::eq(422, http('POST', '/order/quote', ['_token' => csrf(), 'service' => '999999', 'link' => 'https://x.com', 'quantity' => '100'], $nfJson)->status());
@@ -123,4 +123,29 @@ T::test('Confirm: errors (e.g. insufficient balance) return JSON 422 and charge 
     T::eq(422, $r->status());
     T::true(str_contains((string) json_decode($r->body(), true)['error'], 'Insufficient balance'));
     T::eq('1.000000', Fx::balance((int) $u['id']));
+});
+
+T::test('Order page copy: plain customer wording, no technical jargon; friendly validation messages', function () use ($nfService, $nfJson) {
+    $u = Fx::user('100');
+    login_as_user($u);
+    $html = http('GET', '/order')->body();
+    foreach (['Choose a platform', 'Search all services', 'Per 1,000', 'About this service', 'How do you want to order?', 'One-time order', 'Repeat automatically',
+        'Make sure the account or post is public', 'Deliver gradually (drip-feed)', 'Nothing is charged until you confirm', 'Check your order', 'Place order', 'Go back',
+        'Number of new posts', 'Amount per post', 'Start after', 'Stop on'] as $text) {
+        T::true(str_contains($html, e($text)) || str_contains($html, $text), 'shows: ' . $text);
+    }
+    foreach (['server-calculated', 'provider', 'idempotency', 'Drip-feed (deliver in runs)', 'Estimated charge', 'Quantity per post', 'Confirm your order'] as $jargon) {
+        T::true(!str_contains(strtolower(strip_tags(preg_replace('#<script.*?</script>#s', '', $html))), strtolower($jargon)), 'no jargon: ' . $jargon);
+    }
+    $js = (string) file_get_contents(BASE_PATH . '/public/assets/js/app.js');
+    foreach (['Check your subscription', 'Total to pay', 'Held from your balance now (maximum)', 'No services match your search'] as $text) {
+        T::true(str_contains($js, $text), 'script wording: ' . $text);
+    }
+    $q = fn (array $f) => (string) (json_decode(http('POST', '/order/quote', $f + ['_token' => csrf(), 'service' => (string) $nfService], $nfJson)->body(), true)['error'] ?? '');
+    T::true(str_contains($q(['link' => 'not a link', 'quantity' => '1000']), 'Enter the full link, starting with https://'));
+    T::true(str_contains($q(['link' => 'https://instagram.com/nf', 'quantity' => 'lots']), 'whole number, for example 1000'));
+    T::true(str_contains($q(['link' => 'https://instagram.com/nf', 'quantity' => '5']), 'Enter a quantity between'));
+    $bad = json_decode(http('POST', '/order/quote', ['_token' => csrf(), 'service' => '999999', 'link' => 'https://x.com', 'quantity' => '100'], $nfJson)->body(), true);
+    T::true(str_contains((string) $bad['error'], 'not available right now'));
+    App\Services\Auth::logoutUser();
 });

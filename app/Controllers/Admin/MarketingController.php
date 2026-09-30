@@ -20,8 +20,15 @@ final class MarketingController extends Controller
 {
     public function coupons(Request $request): Response
     {
-        $coupons = Database::instance()->fetchAll('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM coupon_usage u WHERE u.coupon_id = c.id) AS bonus_total FROM coupons c ORDER BY c.id DESC');
-        return $this->view('admin/marketing/coupons', ['title' => 'Promo codes', 'coupons' => $coupons]);
+        $db = Database::instance();
+        $coupons = $db->fetchAll('SELECT c.*, (SELECT COALESCE(SUM(amount),0) FROM coupon_usage u WHERE u.coupon_id = c.id) AS bonus_total FROM coupons c ORDER BY c.id DESC');
+        $links = [];
+        foreach ($db->fetchAll('SELECT coupon_id, payment_method_id FROM coupon_payment_methods') as $l) {
+            $links[(int) $l['coupon_id']][] = (int) $l['payment_method_id'];
+        }
+        // Promo codes apply to online gateways only; manual payment methods are never listed.
+        $gateways = $db->fetchAll("SELECT id, name, gateway, status FROM payment_methods WHERE gateway <> 'manual' ORDER BY sort_order, id");
+        return $this->view('admin/marketing/coupons', ['title' => 'Promo codes', 'coupons' => $coupons, 'links' => $links, 'gateways' => $gateways]);
     }
 
     public function saveCoupon(Request $request): Response
@@ -60,12 +67,28 @@ final class MarketingController extends Controller
             'status' => $request->str('status') === 'disabled' ? 'disabled' : 'active',
             'updated_at' => now(),
         ];
-        if ($id) {
-            $db->update('coupons', $row, ['id' => $id]);
-        } else {
-            $id = $db->insert('coupons', $row + ['created_at' => now()]);
+        // Applicable payment gateways: all online gateways, or a selection (never manual payments).
+        $scope = $request->str('gateway_scope') === 'selected' ? 'selected' : 'all';
+        $picked = array_values(array_unique(array_map('intval', (array) ($request->post()['payment_methods'] ?? []))));
+        $valid = array_map('intval', array_column($db->fetchAll("SELECT id FROM payment_methods WHERE gateway <> 'manual'"), 'id'));
+        $picked = array_values(array_intersect($picked, $valid));
+        if ($scope === 'selected' && !$picked) {
+            throw new ValidationException('Select at least one payment gateway for this promo code, or choose "All online gateways".');
         }
-        AuditService::log('coupon.save', 'coupon', $id, $row);
+        $row['all_gateways'] = $scope === 'all' ? 1 : 0;
+        $id = $db->transaction(static function (Database $db) use ($id, $row, $scope, $picked): int {
+            if ($id) {
+                $db->update('coupons', $row, ['id' => $id]);
+            } else {
+                $id = $db->insert('coupons', $row + ['created_at' => now()]);
+            }
+            $db->query('DELETE FROM coupon_payment_methods WHERE coupon_id = ?', [$id]);
+            foreach ($scope === 'selected' ? $picked : [] as $mid) {
+                $db->insert('coupon_payment_methods', ['coupon_id' => $id, 'payment_method_id' => $mid]);
+            }
+            return (int) $id;
+        });
+        AuditService::log('coupon.save', 'coupon', $id, $row + ['gateways' => $scope === 'all' ? 'all' : $picked]);
         $this->success('Promo code saved.');
         return Response::redirect(admin_url('coupons'));
     }

@@ -69,7 +69,7 @@ T::test('Order: quantity outside min/max rejected', function () use ($serviceId)
     T::throws(ValidationException::class, fn () => OrderService::place((int) $u['id'], $serviceId, ['link' => 'https://x.com/a', 'quantity' => '99']), 'between');
     T::throws(ValidationException::class, fn () => OrderService::place((int) $u['id'], $serviceId, ['link' => 'https://x.com/a', 'quantity' => '10001']), 'between');
     T::throws(ValidationException::class, fn () => OrderService::place((int) $u['id'], $serviceId, ['link' => 'https://x.com/a', 'quantity' => '1e3']), 'whole number');
-    T::throws(ValidationException::class, fn () => OrderService::place((int) $u['id'], $serviceId, ['link' => 'javascript:alert(1)', 'quantity' => '100']), 'valid URL');
+    T::throws(ValidationException::class, fn () => OrderService::place((int) $u['id'], $serviceId, ['link' => 'javascript:alert(1)', 'quantity' => '100']), 'full link');
     T::eq('100.000000', Fx::balance((int) $u['id']));
 });
 

@@ -18,7 +18,7 @@ final class Authenticate implements Middleware
                 return Response::json(['error' => 'Unauthenticated'], 401);
             }
             if ($request->method() === 'GET') {
-                Session::set('intended', $request->path());
+                Session::set('intended', $request->pathWithQuery());
             }
             Session::flash('info', 'Please sign in to continue.');
             return Response::redirect('/login');

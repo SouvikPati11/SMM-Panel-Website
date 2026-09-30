@@ -36,10 +36,11 @@ final class ManualPaymentService
         if ((int) $method['require_proof'] === 1 && !$proofFile) {
             throw new ValidationException('Please upload a screenshot of your payment.');
         }
-        $couponId = null;
+        // Promo codes are for online gateways only: a code sent with a manual payment is refused.
         if (trim($couponCode) !== '') {
-            $couponId = (int) CouponService::validate($couponCode, (int) $user['id'], $amount)['coupon']['id'];
+            CouponService::validate($couponCode, (int) $user['id'], $amount, $method); // always throws for manual
         }
+        $couponId = null;
         $proofPath = $proofFile ? UploadService::storePrivateImage($proofFile, 'proofs') : null;
 
         try {

@@ -37,10 +37,25 @@ final class Seeder
 
     public const P2GATEWAY_INSTRUCTIONS = "Pay instantly with any UPI app. You will be redirected to the secure P2Gateway payment page; your balance is credited automatically once the payment is verified. Payment links expire after 30 minutes.";
 
+    /** One row per known platform (Admin → Platforms). Existing rows are never changed. */
+    public static function seedPlatforms(Database $db): void
+    {
+        $i = 0;
+        foreach (\App\Helpers\Platforms::LIST as $key => [$label]) {
+            $db->query(
+                'INSERT IGNORE INTO platforms (`key`, name, status, shortcut, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [$key, $label, 'active', in_array($key, \App\Helpers\Platforms::DEFAULT_SHORTCUTS, true) ? 1 : 0, (($p = array_search($key, \App\Helpers\Platforms::DEFAULT_SHORTCUTS, true)) !== false ? $p : 20 + $i) * 10, now()]
+            );
+            $i++;
+        }
+        \App\Helpers\Platforms::reset();
+    }
+
     public static function run(): void
     {
         $db = Database::instance();
         $now = now();
+        self::seedPlatforms($db);
 
         foreach (self::PERMISSIONS as $name => [$grp, $label]) {
             $db->query('INSERT INTO permissions (name, label, grp) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE label = VALUES(label), grp = VALUES(grp)', [$name, $label, $grp]);

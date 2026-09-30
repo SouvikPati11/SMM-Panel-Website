@@ -78,7 +78,7 @@ final class ApiV2Controller extends Controller
     {
         $rows = Database::instance()->fetchAll(
             "SELECT s.*, c.name AS category FROM services s JOIN categories c ON c.id = s.category_id
-             WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active' ORDER BY c.sort_order, s.sort_order, s.id"
+             WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active'" . \App\Helpers\Platforms::sqlVisible('c.id') . " ORDER BY c.sort_order, s.sort_order, s.id"
         );
         $out = [];
         foreach ($rows as $s) {

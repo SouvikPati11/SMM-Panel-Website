@@ -59,6 +59,8 @@ $router->group(['prefix' => $prefix, 'middleware' => ['csrf']], static function 
         $router->post('/services/save', [Admin\ServiceController::class, 'save'], 'admin.services.save', ['perm:services.manage']);
         $router->post('/services/bulk', [Admin\ServiceController::class, 'bulk'], 'admin.services.bulk', ['perm:services.manage']);
         $router->post('/services/{id}/delete', [Admin\ServiceController::class, 'delete'], 'admin.services.delete', ['perm:services.manage']);
+        $router->get('/platforms', [Admin\ServiceController::class, 'platforms'], 'admin.platforms', ['perm:services.manage']);
+        $router->post('/platforms/save', [Admin\ServiceController::class, 'savePlatforms'], 'admin.platforms.save', ['perm:services.manage']);
         $router->get('/categories', [Admin\ServiceController::class, 'categories'], 'admin.categories', ['perm:services.manage']);
         $router->post('/categories/save', [Admin\ServiceController::class, 'saveCategory'], 'admin.categories.save', ['perm:services.manage']);
         $router->post('/categories/{id}/delete', [Admin\ServiceController::class, 'deleteCategory'], 'admin.categories.delete', ['perm:services.manage']);
@@ -153,6 +155,7 @@ $router->group(['prefix' => $prefix, 'middleware' => ['csrf']], static function 
         $router->get('/health', [Admin\SystemController::class, 'health'], 'admin.health', ['perm:system.manage']);
         $router->post('/health/migrate', [Admin\SystemController::class, 'migrate'], 'admin.health.migrate', ['perm:system.manage']);
         $router->get('/cron', [Admin\SystemController::class, 'cron'], 'admin.cron', ['perm:system.manage']);
+        $router->post('/cron/url', [Admin\SystemController::class, 'cronUrl'], 'admin.cron.url', ['perm:system.manage']);
         $router->post('/cron/{task}/run', [Admin\SystemController::class, 'runCron'], 'admin.cron.run', ['perm:system.manage']);
     });
 });

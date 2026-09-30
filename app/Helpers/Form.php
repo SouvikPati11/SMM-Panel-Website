@@ -87,6 +87,10 @@ final class Form
 
     public static function toggle(string $name, string $label, bool $checked, ?string $hint = null): string
     {
+        $old = Session::old($name, "\0");
+        if ($old !== "\0") { // restored after a failed/expired submit
+            $checked = $old === '1';
+        }
         return '<div class="field"><input type="hidden" name="' . e($name) . '" value="0"><label class="switch"><input type="checkbox" name="' . e($name) . '" value="1"' . ($checked ? ' checked' : '') . '> <span>' . e($label) . '</span></label>'
             . ($hint ? '<div class="hint">' . $hint . '</div>' : '') . '</div>';
     }

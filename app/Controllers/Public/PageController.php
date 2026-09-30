@@ -27,7 +27,7 @@ final class PageController extends Controller
         ];
         $popular = $db->fetchAll(
             "SELECT s.id, s.name, s.rate, s.type, c.name AS category, c.platform AS category_platform FROM services s JOIN categories c ON c.id = s.category_id
-             WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active' ORDER BY s.sort_order, s.id LIMIT 5"
+             WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active'" . \App\Helpers\Platforms::sqlVisible('c.id') . " ORDER BY s.sort_order, s.id LIMIT 5"
         );
         $faqs = $db->fetchAll("SELECT * FROM faqs WHERE status = 'active' ORDER BY sort_order, id LIMIT 5");
         $posts = setting('blog_enabled', '1') === '1'
@@ -35,7 +35,7 @@ final class PageController extends Controller
             : [];
         // Supported platforms = what the live catalog actually offers (no invented claims).
         $platforms = [];
-        foreach ($db->fetchAll("SELECT c.id, c.name, c.platform, COUNT(s.id) AS n FROM categories c JOIN services s ON s.category_id = c.id AND s.status = 'active' AND s.is_hidden = 0 WHERE c.status = 'active' GROUP BY c.id, c.name, c.platform ORDER BY c.sort_order, c.name") as $c) {
+        foreach ($db->fetchAll("SELECT c.id, c.name, c.platform, COUNT(s.id) AS n FROM categories c JOIN services s ON s.category_id = c.id AND s.status = 'active' AND s.is_hidden = 0 WHERE c.status = 'active'" . \App\Helpers\Platforms::sqlVisible('c.id') . " GROUP BY c.id, c.name, c.platform ORDER BY c.sort_order, c.name") as $c) {
             $key = \App\Helpers\Platforms::forCategory($c);
             $platforms[$key] ??= ['key' => $key, 'label' => \App\Helpers\Platforms::label($key), 'services' => 0, 'category' => (int) $c['id']];
             $platforms[$key]['services'] += (int) $c['n'];
@@ -57,7 +57,7 @@ final class PageController extends Controller
         $db = Database::instance();
         $q = mb_substr($request->str('q'), 0, 100);
         $cat = $request->int('category');
-        $where = "s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active'";
+        $where = "s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active'" . \App\Helpers\Platforms::sqlVisible('c.id');
         $params = [];
         if ($q !== '') {
             $where .= ' AND (s.name LIKE ? OR s.id = ?)';

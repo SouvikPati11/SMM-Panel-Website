@@ -190,6 +190,83 @@ T::test('Cron: admin page shows last run, diagnostics and the CLI command; HTTP 
     $backup === null ? @unlink($statusFile) : file_put_contents($statusFile, $backup);
     T::eq(200, $r->status());
     T::eq('done', $recorded['stage']);
-    T::true(str_contains((string) $recorded['sapi'], 'URL trigger'));
+    T::eq('url', $recorded['trigger'] ?? null);
     T::eq(404, http('GET', '/tasks/run/' . str_repeat('x', 40))->status(), 'wrong key');
+});
+
+
+T::test('Cron URL: admin creates a working URL + wget/curl commands; calling it executes a real due subscription', function () {
+    $db = Database::instance();
+    Config::set('cron_key', ''); // no CRON_KEY in .env (typical upgraded install)
+    App\Services\SettingsService::set('cron_key', '');
+    $statusFile = STORAGE_PATH . '/cron-status.json';
+    $backup = is_file($statusFile) ? file_get_contents($statusFile) : null;
+    $adminId = (int) $db->fetchColumn('SELECT id FROM admins WHERE is_super = 1 LIMIT 1');
+    login_as_admin($adminId);
+    $html = http('GET', '/' . admin_path() . '/cron')->body();
+    T::true(str_contains($html, 'Create cron URL'), 'create button'); T::true(!str_contains($html, '/tasks/run/'), 'no url yet');
+    T::eq(404, http('GET', '/tasks/run/' . str_repeat('a', 48))->status());
+
+    http('POST', '/' . admin_path() . '/cron/url', ['_token' => csrf()]);
+    $key = App\Services\CronUrl::key();
+    T::eq(48, strlen($key));
+    T::true(!str_contains((string) $db->fetchColumn("SELECT value FROM settings WHERE `key` = 'cron_key'"), $key), 'stored encrypted');
+    $url = url('/tasks/run/' . $key);
+    $html = http('GET', '/' . admin_path() . '/cron')->body();
+    T::true(str_contains($html, e("wget -q -O - --timeout=600 '" . $url . "'")), 'full wget command shown');
+    T::true(str_contains($html, e("curl -fsS -L --max-time 600 '" . $url . "'")) && str_contains($html, 'id="cron-url-value"'), 'curl shown');
+    unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
+
+    // A real due task: a scheduled subscription whose next delivery is due.
+    Fx::http(['https://provider.test/' => static fn () => Fx::json(['order' => 880001])]);
+    App\Services\SettingsService::set('subscriptions_enabled', '1');
+    $svc = Fx::service(Fx::provider(), ['name' => 'Cron URL svc', 'subscription_enabled' => 1]);
+    $u = Fx::user('50');
+    $sub = App\Services\SubscriptionService::create((int) $u['id'], $svc, ['link' => 'https://instagram.com/cronurl', 'quantity' => '1000'], 24, 3, 'cronurl-1');
+    $db->query('UPDATE subscriptions SET next_run_at = ? WHERE id = ?', [gmdate('Y-m-d H:i:s', time() - 60), $sub['id']]);
+    $db->query("DELETE FROM cron_runs WHERE task = 'subscriptions'");
+    $db->query('DELETE FROM rate_limits');
+    $before = (int) $db->fetchColumn('SELECT COUNT(*) FROM orders WHERE subscription_id = ?', [$sub['id']]);
+
+    $r = http('GET', '/tasks/run/' . $key, [], ['HTTP_USER_AGENT' => 'Wget/1.21.3']);
+    $body = json_decode($r->body(), true);
+    T::eq(200, $r->status(), $r->body());
+    T::eq('success', $body['ran']['subscriptions'] ?? null);
+    T::true($body['ok'] === true && str_contains($body['message'], 'due task'), 'body ' . $r->body());
+    T::eq($before + 1, (int) $db->fetchColumn('SELECT COUNT(*) FROM orders WHERE subscription_id = ?', [$sub['id']]), 'delivery 2 ordered by the URL call');
+    T::eq(2, (int) App\Services\SubscriptionService::find((int) $sub['id'])['completed_cycles']);
+    T::eq('success', $db->fetchColumn("SELECT status FROM cron_runs WHERE task = 'subscriptions' ORDER BY id DESC LIMIT 1"));
+    T::true(str_contains((string) $r->header('Cache-Control'), 'no-store') && $r->header('X-LiteSpeed-Cache-Control') === 'no-cache', 'never cached by LiteSpeed');
+    $st = CronStatus::read();
+    T::eq(['url', 'done', 200], [$st['trigger'], $st['stage'], $st['url_last_status']]);
+    T::true(str_contains((string) ($st['url_last_agent'] ?? ''), 'Wget'), 'agent ' . json_encode($st));
+
+    // Called again in the same minute: nothing due, nothing ordered twice.
+    $again = json_decode(http('GET', '/tasks/run/' . $key)->body(), true);
+    T::eq([], $again['ran']);
+    T::true(str_contains($again['message'], 'No task was due'), 'again');
+    T::eq($before + 1, (int) $db->fetchColumn('SELECT COUNT(*) FROM orders WHERE subscription_id = ?', [$sub['id']]));
+
+    // Rotation: the old URL stops working and the rejected call is reported to the admin.
+    login_as_admin($adminId);
+    http('POST', '/' . admin_path() . '/cron/url', ['_token' => csrf()]);
+    T::true(App\Services\CronUrl::key() !== $key, 'rotated');
+    $db->query('DELETE FROM rate_limits');
+    T::eq(404, http('GET', '/tasks/run/' . $key)->status());
+    T::true(str_contains(implode(' ', array_column(CronStatus::problems(CronStatus::read(), CronService::status()), 'text')), 'wrong or old key'), 'rejected diag ' . json_encode(CronStatus::read()));
+    // POST without CSRF cannot rotate it.
+    $k2 = App\Services\CronUrl::key();
+    try {
+        http('POST', '/' . admin_path() . '/cron/url', ['_token' => 'bad']);
+    } catch (\Throwable) {
+    }
+    T::eq($k2, App\Services\CronUrl::key());
+    // CRON_KEY in .env takes precedence and cannot be rotated from the panel.
+    Config::set('cron_key', str_repeat('e', 40));
+    T::eq('env', App\Services\CronUrl::source());
+    http('POST', '/' . admin_path() . '/cron/url', ['_token' => csrf()]);
+    T::eq(str_repeat('e', 40), App\Services\CronUrl::key());
+    unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
+    Config::set('cron_key', '');
+    $backup === null ? @unlink($statusFile) : file_put_contents($statusFile, $backup);
 });

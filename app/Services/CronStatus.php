@@ -61,12 +61,15 @@ final class CronStatus
         if (!empty($status['exit_code']) && !empty($status['error'])) {
             $out[] = ['level' => 'danger', 'text' => 'The last cron run failed (exit code ' . (int) $status['exit_code'] . '): ' . $status['error']];
         }
-        if (!empty($status['sapi']) && !in_array($status['sapi'], ['cli', 'phpdbg'], true)) {
+        if (($status['trigger'] ?? '') !== 'url' && !empty($status['sapi']) && !in_array($status['sapi'], ['cli', 'phpdbg'], true)) {
             $out[] = ['level' => 'warning', 'text' => 'Cron is running through the "' . $status['sapi'] . '" PHP binary (' . ($status['php_binary'] ?? '?') . ') instead of the PHP CLI. It works, but web binaries such as lsphp have web time limits; use the CLI command shown below.'];
         }
         $cronMinor = implode('.', array_slice(explode('.', (string) ($status['php_version'] ?? '')), 0, 2));
         if ($cronMinor !== '' && $cronMinor !== PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION) {
             $out[] = ['level' => 'warning', 'text' => 'Cron uses PHP ' . $status['php_version'] . ' but the website runs PHP ' . PHP_VERSION . '. Use the CLI binary of the same version (shown below).'];
+        }
+        if (!empty($status['url_rejected_at']) && strtotime($status['url_rejected_at'] . ' UTC') >= max((int) strtotime(($status['url_last_at'] ?? '1970-01-01') . ' UTC'), time() - 86400)) {
+            $out[] = ['level' => 'warning', 'text' => 'A cron URL with a wrong or old key was called ' . time_ago($status['url_rejected_at']) . ' (from ' . ($status['url_rejected_ip'] ?? '?') . ') and did nothing. Update the cron job with the URL/command shown below.'];
         }
         foreach ($tasks as $name => $t) {
             if (($t['last']['status'] ?? null) === 'failed') {

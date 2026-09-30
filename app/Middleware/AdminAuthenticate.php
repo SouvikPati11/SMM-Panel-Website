@@ -18,7 +18,7 @@ final class AdminAuthenticate implements Middleware
                 return Response::json(['error' => 'Unauthenticated'], 401);
             }
             if ($request->method() === 'GET') {
-                Session::set('admin_intended', $request->path());
+                Session::set('admin_intended', $request->pathWithQuery());
             }
             return Response::redirect(admin_url('login'));
         }

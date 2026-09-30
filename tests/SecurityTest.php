@@ -13,14 +13,20 @@ $adminId = $db->insert('admins', ['username' => 'root', 'email' => 'root@example
 $supportId = $db->insert('admins', ['username' => 'agent', 'email' => 'agent@example.com', 'password_hash' => password_hash('AgentPass123', PASSWORD_DEFAULT), 'status' => 'active', 'is_super' => 0, 'created_at' => now(), 'updated_at' => now()]);
 $db->query("INSERT INTO admin_roles (admin_id, role_id) SELECT ?, id FROM roles WHERE name = 'Support'", [$supportId]);
 
-T::test('CSRF: POST without token is rejected (419)', function () {
+T::test('CSRF: POST without token is rejected (cross-site 403; same-site form → back with a message, nothing processed)', function () {
     $e = null;
     try {
         http('POST', '/login', ['login' => 'x', 'password' => 'y']);
     } catch (HttpException $ex) {
         $e = $ex;
     }
-    T::eq(419, $e?->getStatus());
+    T::eq(403, $e?->getStatus(), 'no same-site evidence');
+    $before = (int) Database::instance()->fetchColumn('SELECT COUNT(*) FROM login_attempts');
+    $r = http('POST', '/login', ['login' => 'x', 'password' => 'y'], ['HTTP_ORIGIN' => rtrim(url('/'), '/'), 'HTTP_REFERER' => url('/login')]);
+    T::eq(303, $r->status());
+    T::true(str_ends_with((string) $r->header('Location'), '/login'));
+    T::eq($before, (int) Database::instance()->fetchColumn('SELECT COUNT(*) FROM login_attempts'), 'login not attempted');
+    unset($_SESSION['_restore'], $_SESSION['_flash']);
 });
 
 T::test('CSRF: POST with wrong token is rejected, correct token accepted', function () {
@@ -171,7 +177,9 @@ T::test('Security headers & CSP are present on HTML responses', function () {
 });
 
 T::test('Secrets: provider & gateway credentials are encrypted at rest', function () {
-    $raw = (string) Database::instance()->fetchColumn('SELECT api_key_enc FROM providers LIMIT 1');
+    $pid = Fx::provider(); // self-contained: does not rely on another suite having created one
+    Fx::gatewayMethod('oxapay', ['merchant_api_key' => 'OXA-TEST-KEY']);
+    $raw = (string) Database::instance()->fetchColumn('SELECT api_key_enc FROM providers WHERE id = ?', [$pid]);
     T::true(str_starts_with($raw, 'enc:v1:') && !str_contains($raw, 'provkey123'));
     $g = (string) Database::instance()->fetchColumn("SELECT credentials_enc FROM payment_methods WHERE gateway = 'oxapay'");
     T::true(!str_contains($g, 'OXA-TEST'), 'gateway key must be encrypted');

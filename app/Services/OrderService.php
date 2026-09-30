@@ -106,13 +106,13 @@ final class OrderService
         if ($linkType === 'url') {
             $scheme = strtolower((string) parse_url($link, PHP_URL_SCHEME));
             if (!filter_var($link, FILTER_VALIDATE_URL) || !in_array($scheme, ['http', 'https'], true)) {
-                throw new ValidationException('Please enter a valid URL starting with http:// or https://');
+                throw new ValidationException('Enter the full link, starting with https:// (for example https://instagram.com/yourname).');
             }
         } elseif (preg_match('/\s/', $link)) {
             throw new ValidationException(($service['link_label'] ?: 'Link') . ' must not contain spaces.');
         }
         if (!empty($custom['link_regex']) && @preg_match((string) $custom['link_regex'], '') !== false && !preg_match((string) $custom['link_regex'], $link)) {
-            throw new ValidationException(($service['link_label'] ?: 'Link') . ' format is not accepted for this service.');
+            throw new ValidationException(($service['link_label'] ?: 'Link') . ' doesn\'t look right for this service. Check that you copied the full link.');
         }
 
         $extra = [];
@@ -134,7 +134,7 @@ final class OrderService
         if ($def['quantity']) {
             $q = (string) ($input['quantity'] ?? '');
             if (!preg_match('/^\d{1,10}$/', $q)) {
-                throw new ValidationException('Quantity must be a whole number.');
+                throw new ValidationException('Enter the quantity as a whole number, for example 1000.');
             }
             $quantity = (int) $q;
         }
@@ -143,7 +143,7 @@ final class OrderService
         }
         if (!$def['package']) {
             if ($quantity < (int) $service['min_quantity'] || $quantity > (int) $service['max_quantity']) {
-                throw new ValidationException(sprintf('Quantity must be between %s and %s.', number_format((int) $service['min_quantity']), number_format((int) $service['max_quantity'])));
+                throw new ValidationException(sprintf('Enter a quantity between %s and %s.', number_format((int) $service['min_quantity']), number_format((int) $service['max_quantity'])));
             }
         }
         if (isset($def['field'])) {
@@ -163,24 +163,30 @@ final class OrderService
             $runs = (int) ($input['runs'] ?? 0);
             $interval = (int) ($input['interval'] ?? 0);
             if ($runs < 2 || $runs > 1000) {
-                throw new ValidationException('Drip-feed runs must be between 2 and 1000.');
+                throw new ValidationException('For gradual delivery, choose between 2 and 1,000 rounds.');
             }
             if ($interval < 1 || $interval > 1440) {
-                throw new ValidationException('Drip-feed interval must be between 1 and 1440 minutes.');
+                throw new ValidationException('For gradual delivery, choose 1 to 1,440 minutes between rounds.');
             }
         }
 
         return ['link' => $link, 'quantity' => $quantity, 'runs' => $runs, 'interval' => $interval, 'extra' => $extra];
     }
 
-    public static function orderableService(int $serviceId): array
+    /**
+     * A service customers may order now. $checkPlatform = false only for
+     * deliveries of subscriptions that already exist: turning a platform OFF
+     * stops new orders but does not break subscriptions users already paid for.
+     */
+    public static function orderableService(int $serviceId, bool $checkPlatform = true): array
     {
         $service = Database::instance()->fetch(
-            "SELECT s.*, c.status AS category_status FROM services s JOIN categories c ON c.id = s.category_id WHERE s.id = ?",
+            "SELECT s.*, c.status AS category_status, c.name AS category_name, c.platform AS category_platform FROM services s JOIN categories c ON c.id = s.category_id WHERE s.id = ?",
             [$serviceId]
         );
-        if (!$service || $service['status'] !== 'active' || (int) $service['is_hidden'] === 1 || $service['category_status'] !== 'active') {
-            throw new ValidationException('The selected service is not available.');
+        if (!$service || $service['status'] !== 'active' || (int) $service['is_hidden'] === 1 || $service['category_status'] !== 'active'
+            || ($checkPlatform && !\App\Helpers\Platforms::categoryVisible(['name' => $service['category_name'], 'platform' => $service['category_platform']]))) {
+            throw new ValidationException('This service is not available right now. Please choose another one.');
         }
         return $service;
     }
@@ -201,9 +207,9 @@ final class OrderService
         if (!$user || $user['status'] !== 'active') {
             throw new ValidationException('Your account is not active.');
         }
-        $service = self::orderableService($serviceId);
+        $service = self::orderableService($serviceId, empty($attach['subscription_id']));
         if (!empty(self::TYPES[$service['type']]['subscription']) && empty($attach['subscription_id'])) {
-            throw new ValidationException('"' . $service['name'] . '" is a subscription service: order it from the New order page as an auto-subscription.');
+            throw new ValidationException('"' . $service['name'] . '" can only be ordered as a subscription (choose it on the New order page).');
         }
         if (isset($attach['posts'])) {
             // Post-based subscription: validated by SubscriptionService::validatePosts(); one provider
@@ -219,11 +225,11 @@ final class OrderService
         PriceProtection::assertSellable($service, $rate);
 
         if (!Money::isPositive($charge)) {
-            throw new ValidationException('This order amount is too small to process.');
+            throw new ValidationException('This order is too small. Please increase the quantity.');
         }
         $minOrder = (string) setting('min_order_amount', '0');
         if (Money::isNumeric($minOrder) && Money::cmp($charge, $minOrder) < 0) {
-            throw new ValidationException('The minimum order amount is ' . money($minOrder) . '.');
+            throw new ValidationException('The minimum order is ' . money($minOrder) . '. Please increase the quantity.');
         }
 
         if ($idempotencyKey !== null) {
@@ -240,7 +246,7 @@ final class OrderService
                 // Lock the wallet first so concurrent orders from the same user serialise.
                 $bal = (string) $db->fetchColumn('SELECT balance FROM wallets WHERE user_id = ? FOR UPDATE', [$userId]);
                 if (Money::cmp($bal, $charge) < 0) {
-                    throw new ValidationException('Insufficient balance. This order costs ' . money($charge) . ' and your balance is ' . money($bal) . '.');
+                    throw new ValidationException('Insufficient balance: this order costs ' . money($charge) . ' and you have ' . money($bal) . '. Add funds and try again.');
                 }
                 $orderId = $db->insert('orders', [
                     'user_id' => $userId,

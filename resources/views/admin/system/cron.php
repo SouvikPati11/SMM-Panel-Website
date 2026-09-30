@@ -12,6 +12,7 @@ $last = $cronStatus['invoked_at'] ?? null; ?>
       <dt>Last success</dt><dd><?= !empty($cronStatus['last_success_at']) ? e(fmt_date($cronStatus['last_success_at'], 'M j, Y H:i:s')) : '—' ?></dd>
       <dt>Last error</dt><dd class="break"><?= !empty($cronStatus['last_error']) ? e(fmt_date($cronStatus['last_error_at'] ?? null, 'M j H:i')) . ' — <span class="text-danger">' . e(str_limit((string) $cronStatus['last_error'], 300)) . '</span>' : '—' ?></dd>
       <dt>Exit code</dt><dd class="mono"><?= isset($cronStatus['exit_code']) ? (int) $cronStatus['exit_code'] : '—' ?></dd>
+      <dt>Called by</dt><dd><?= ($cronStatus['trigger'] ?? '') === 'url' ? 'Cron URL' : (!empty($cronStatus['invoked_at']) ? 'PHP command (CLI)' : '—') ?></dd>
       <dt>PHP used by cron</dt><dd class="mono break"><?= !empty($cronStatus['php_binary']) ? e($cronStatus['php_binary']) . ' · PHP ' . e($cronStatus['php_version'] ?? '?') . ' · ' . e($cronStatus['sapi'] ?? '?') : '—' ?></dd>
       <dt>Last <code>--check</code></dt><dd class="break"><?= !empty($cronCheck['invoked_at']) ? e(fmt_date($cronCheck['invoked_at'], 'M j H:i')) . ' · ' . (empty($cronCheck['exit_code']) ? '<span class="text-success">all checks passed</span>' : '<span class="text-danger">' . e(str_limit((string) ($cronCheck['error'] ?? 'failed'), 200)) . '</span>') . ' · <span class="mono text-xs">' . e(($cronCheck['php_binary'] ?? '?') . ' · PHP ' . ($cronCheck['php_version'] ?? '?') . ' · ' . ($cronCheck['sapi'] ?? '?')) . '</span>' : '—' ?></dd>
       <dt>Summary</dt><dd class="mono text-xs break"><?= !empty($cronStatus['summary']) ? e(json_encode($cronStatus['summary'])) : '—' ?></dd>
@@ -24,18 +25,42 @@ $last = $cronStatus['invoked_at'] ?? null; ?>
 </div>
 
 <div class="card mb-2"><div class="card-header"><h2>Set up the cron job</h2></div><div class="card-body">
-  <p class="text-sm">Add <strong>one</strong> cron job that runs every minute (or every 5 minutes if your plan requires it). <code>run.php</code> starts each task on its own schedule, and database locks stop runs from overlapping.</p>
-  <div class="field"><label>Command</label>
-    <div class="copy-box"><span class="break"><?= e($cmd) ?></span><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($cmd) ?>" aria-label="Copy command"><?= icon('copy') ?></button></div></div>
+  <p class="text-sm">Add <strong>one</strong> cron job that runs <strong>every minute</strong> (every 5 minutes also works). Each call starts only the tasks that are due, and database locks stop runs from overlapping. Choose <strong>one</strong> of the two options.</p>
+
+  <h3 class="cron-option-title">Option A — PHP command (recommended)</h3>
+  <div class="field"><label for="cron-cmd">Command</label>
+    <div class="copy-box"><code id="cron-cmd" class="break-all"><?= e($cmd) ?></code><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($cmd) ?>" aria-label="Copy command"><?= icon('copy') ?> <span class="copy-label">Copy</span></button></div></div>
   <ul class="text-sm">
-    <li><strong>Hostinger:</strong> hPanel → Advanced → Cron Jobs → <em>Custom</em>. Paste the command above and choose "Every minute". Use <em>View output</em> on the job to see each run's summary line or error.</li>
+    <li><strong>Hostinger:</strong> hPanel → Advanced → Cron Jobs → <em>Custom</em>. Paste the command and choose "Every minute". <em>View output</em> on the job shows each run's summary line or error.</li>
     <li><strong>cPanel:</strong> Advanced → Cron Jobs → "Once per minute" → the same command.</li>
-    <li>Use the PHP <strong>CLI</strong> binary, not <code>lsphp</code>. <?php if (count($phpCandidates) > 1): ?>Other CLI binaries found on this server: <?php foreach (array_slice($phpCandidates, 1) as $c): ?><code><?= e($c) ?></code> <?php endforeach ?>.<?php endif ?> The CLI must be PHP <?= e(\App\Core\Requirements::MIN_PHP) ?>+; ideally the same version as the website (<?= e(PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION) ?>), e.g. <code>/opt/alt/php<?= PHP_MAJOR_VERSION . PHP_MINOR_VERSION ?>/usr/bin/php</code>.</li>
-    <li>Do not add <code>&gt;/dev/null 2&gt;&amp;1</code>: runs print one line, and errors are also kept here and in <code>storage/logs/cron-*.log</code>.</li>
+    <li>Use the PHP <strong>CLI</strong> binary, not <code>lsphp</code>. <?php if (count($phpCandidates) > 1): ?>Other CLI binaries found on this server: <?php foreach (array_slice($phpCandidates, 1) as $c): ?><code><?= e($c) ?></code> <?php endforeach ?>.<?php endif ?> It must be PHP <?= e(\App\Core\Requirements::MIN_PHP) ?>+, ideally <?= e(PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION) ?> like the website (e.g. <code>/opt/alt/php<?= PHP_MAJOR_VERSION . PHP_MINOR_VERSION ?>/usr/bin/php</code>).</li>
+    <li>Check it with SSH or a one-off cron job: <code class="break-all"><?= e($cmd) ?> --check</code></li>
   </ul>
-  <p class="text-sm mb-1"><strong>Verify after setting it up:</strong> within a few minutes "Last invocation" above shows the time and the PHP binary cron used. With SSH (or a one-off cron job) you can also run:</p>
-  <div class="copy-box"><span class="break"><?= e($cmd) ?> --check</span><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($cmd) ?> --check" aria-label="Copy check command"><?= icon('copy') ?></button></div>
-  <?php if ($httpKey): ?><p class="hint">URL trigger (only if your host cannot run PHP from cron): <code>/tasks/run/&lt;CRON_KEY from .env&gt;</code>.</p><?php endif ?>
+
+  <h3 class="cron-option-title" id="cron-url">Option B — Cron URL</h3>
+  <?php if ($cronUrl): ?>
+    <p class="text-sm">Use this when your host can only call a URL, or the PHP command does not work. In Hostinger's <em>Custom</em> cron job, paste the <strong>wget</strong> command (a bare URL is not a command and never runs).</p>
+    <div class="field"><label for="cron-wget">Hostinger / cPanel command (wget)</label>
+      <div class="copy-box"><code id="cron-wget" class="break-all"><?= e($cronUrlCommands['wget']) ?></code><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($cronUrlCommands['wget']) ?>" aria-label="Copy wget command"><?= icon('copy') ?> <span class="copy-label">Copy</span></button></div></div>
+    <div class="field"><label for="cron-curl">Alternative (curl)</label>
+      <div class="copy-box"><code id="cron-curl" class="break-all"><?= e($cronUrlCommands['curl']) ?></code><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($cronUrlCommands['curl']) ?>" aria-label="Copy curl command"><?= icon('copy') ?> <span class="copy-label">Copy</span></button></div></div>
+    <div class="field"><label for="cron-url-value">URL only (for external cron services)</label>
+      <div class="copy-box"><code id="cron-url-value" class="break-all"><?= e($cronUrl) ?></code><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($cronUrl) ?>" aria-label="Copy cron URL"><?= icon('copy') ?> <span class="copy-label">Copy</span></button></div>
+      <div class="hint">Keep it secret: anyone with the URL can start the tasks (they cannot see or change data). Opening it in a browser runs the due tasks now and shows a JSON summary.</div></div>
+    <dl class="dl cron-url-diag">
+      <dt>Last URL call</dt><dd><?= !empty($cronStatus['url_last_at']) ? e(fmt_date($cronStatus['url_last_at'], 'M j, Y H:i:s')) . ' <span class="text-muted">(' . e(time_ago($cronStatus['url_last_at'])) . ')</span> · HTTP ' . e((string) ($cronStatus['url_last_status'] ?? '…')) . ' · ' . e((string) ($cronStatus['url_last_ip'] ?? '')) : 'Never' ?></dd>
+      <?php if (!empty($cronStatus['url_rejected_at'])): ?><dt>Last rejected call</dt><dd><?= e(fmt_date($cronStatus['url_rejected_at'], 'M j, Y H:i:s')) ?> · wrong or old key from <?= e((string) ($cronStatus['url_rejected_ip'] ?? '?')) ?></dd><?php endif ?>
+      <dt>Key source</dt><dd><?= $cronUrlSource === 'env' ? '<code>CRON_KEY</code> in .env' : 'Generated here (stored encrypted)' ?></dd>
+    </dl>
+    <div class="btn-group mt-1">
+      <a class="btn btn-secondary btn-sm" href="<?= e($cronUrl) ?>" target="_blank" rel="noopener noreferrer"><?= icon('external') ?> Run the URL now</a>
+      <?php if ($cronUrlSource !== 'env'): ?><form method="post" action="<?= e(admin_url('cron/url')) ?>" data-confirm="Generate a new cron URL? The current URL stops working immediately and the cron job must be updated."><?= csrf_field() ?><button class="btn btn-ghost btn-sm" type="submit"><?= icon('refresh') ?> Generate a new URL</button></form><?php endif ?>
+    </div>
+  <?php else: ?>
+    <p class="text-sm">The URL trigger is off. Turn it on if your host can only call a URL.</p>
+    <form method="post" action="<?= e(admin_url('cron/url')) ?>"><?= csrf_field() ?><button class="btn btn-primary btn-sm" type="submit"><?= icon('link') ?> Create cron URL</button></form>
+  <?php endif ?>
+  <p class="hint mt-2 mb-0">Within a few minutes of setting up either option, "Last invocation" above shows the time and how cron was called. Runs are also logged in <code>storage/logs/cron-*.log</code>.</p>
 </div></div>
 
 <div class="card mb-2"><div class="table-wrap"><table class="table table-cards"><thead><tr><th>Task</th><th>Schedule</th><th>Last run</th><th>Result</th><th>Last success</th><th class="num">Duration</th><th></th></tr></thead><tbody>

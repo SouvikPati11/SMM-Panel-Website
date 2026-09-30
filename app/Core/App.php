@@ -57,6 +57,7 @@ final class App
         self::$request = $request;
         \App\Services\CurrencyService::reset(); // display currency is resolved per request
         \App\Services\PriceProtection::reset();
+        \App\Helpers\Platforms::reset();
         Cookie::reset();
 
         // Before installation, everything goes to the installer.
@@ -81,9 +82,26 @@ final class App
 
         $stateless = in_array('stateless', $route['middleware'], true);
         $request->setAttribute('session', !$stateless);
+        $restoring = false;
         if (!$stateless) {
             Session::start($request);
             Session::ageFlashInput();
+            // A form refused because its session/token expired (VerifyCsrf) is refilled
+            // the next time its page is shown; kept until the page actually renders
+            // (not consumed by the sign-in redirect in between). Expires after an hour.
+            $restore = $_SESSION['_restore'] ?? null;
+            if (is_array($restore) && $request->method() === 'GET') {
+                if (time() - (int) ($restore['at'] ?? 0) > 3600) {
+                    unset($_SESSION['_restore']);
+                } elseif (in_array($restore['path'] ?? '', [$request->pathWithQuery(), $request->path()], true)) {
+                    $_SESSION['_old_current'] = (array) ($restore['input'] ?? []);
+                    $restoring = true;
+                    $adminArea = str_starts_with($request->path(), '/' . admin_path());
+                    if ($adminArea ? \App\Services\Auth::admin() !== null : \App\Services\Auth::user() !== null) {
+                        Session::flash('info', 'Your unsaved changes were restored. Check them and submit again.');
+                    }
+                }
+            }
         }
 
         $core = static function (Request $req) use ($route, $params): Response {
@@ -92,6 +110,9 @@ final class App
 
         try {
             $response = Pipeline::run($request, $route['middleware'], $core);
+            if ($restoring && $response->status() === 200) {
+                unset($_SESSION['_restore']);
+            }
         } catch (ValidationException $e) {
             if ($request->wantsJson() || $stateless) {
                 $response = Response::json(['error' => $e->getMessage(), 'errors' => $e->errors()], 422);

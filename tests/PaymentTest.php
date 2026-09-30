@@ -223,14 +223,16 @@ T::test('Manual: approve with corrected amount', function () use ($manualId) {
 
 // ------------------------------------------------------------------ Coupons & referrals
 
-T::test('Coupon: percent bonus capped, per-user limit enforced', function () use ($manualId) {
+T::test('Coupon: percent bonus capped, per-user limit enforced', function () use ($oxaMethod, $oxaFake) {
     $db = Database::instance();
     $db->insert('coupons', ['code' => 'WELCOME10', 'type' => 'percent', 'value' => '10', 'min_deposit' => '20', 'max_discount' => '3', 'usage_limit' => 100, 'per_user_limit' => 1, 'status' => 'active', 'created_at' => now(), 'updated_at' => now()]);
     $u = Fx::user();
     T::throws(ValidationException::class, fn () => CouponService::validate('WELCOME10', (int) $u['id'], '10'), 'minimum');
     T::eq('2.5000', CouponService::validate('welcome10', (int) $u['id'], '25')['bonus']);
-    $rid = ManualPaymentService::submit($u, $manualId, '50', 'UTR-CPN-1', null, '', 'WELCOME10');
-    ManualPaymentService::approve($rid, 1, null, '');
+    $st = 'Paid';
+    $oxaFake($st, '50');
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '50', 'WELCOME10', '1.2.3.4');
+    PaymentService::complete((int) $p['id'], 'test');
     T::eq('53.000000', Fx::balance((int) $u['id'])); // 10% of 50 = 5, capped at 3
     T::throws(ValidationException::class, fn () => CouponService::validate('WELCOME10', (int) $u['id'], '50'), 'already used');
 });
@@ -402,4 +404,129 @@ T::test('Gateway bonus (HTTP): shown before paying; tampered POST fields cannot 
     unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
     $setBonus($oxaMethod, '0', '0', null);
     $setBonus($manualId, '0', '0', null);
+});
+
+
+// ------------------------------------------------------------------ Promo codes per payment gateway
+
+$mkCoupon = static function (string $code, array $methodIds = null, array $extra = []): int {
+    $db = Database::instance();
+    $id = $db->insert('coupons', $extra + ['code' => $code, 'type' => 'fixed', 'value' => '2', 'per_user_limit' => 5, 'status' => 'active', 'all_gateways' => $methodIds === null ? 1 : 0, 'created_at' => now(), 'updated_at' => now()]);
+    foreach ((array) $methodIds as $m) {
+        $db->insert('coupon_payment_methods', ['coupon_id' => $id, 'payment_method_id' => $m]);
+    }
+    return $id;
+};
+$methodRow = static fn (int $id) => Database::instance()->fetch('SELECT * FROM payment_methods WHERE id = ?', [$id]);
+
+T::test('Promo per gateway: allowed on one gateway, rejected on another (server-side, also at payment creation)', function () use ($mkCoupon, $methodRow, $oxaMethod, $cmMethod, $oxaFake) {
+    $mkCoupon('ONLYOXA', [$oxaMethod]);
+    $u = Fx::user();
+    T::eq('2.0000', CouponService::validate('ONLYOXA', (int) $u['id'], '25', $methodRow($oxaMethod))['bonus']);
+    T::throws(ValidationException::class, fn () => CouponService::validate('ONLYOXA', (int) $u['id'], '25', $methodRow($cmMethod)), 'cannot be used with');
+    // The payment itself is refused on the wrong gateway: no invoice, no coupon attached.
+    $before = (int) Database::instance()->fetchColumn('SELECT COUNT(*) FROM payments WHERE user_id = ?', [$u['id']]);
+    T::throws(ValidationException::class, fn () => PaymentService::createGatewayPayment($u, $cmMethod, '25', 'ONLYOXA', '1.2.3.4'), 'cannot be used with');
+    T::eq($before, (int) Database::instance()->fetchColumn('SELECT COUNT(*) FROM payments WHERE user_id = ?', [$u['id']]));
+    $st = 'Waiting';
+    $oxaFake($st);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', 'ONLYOXA', '1.2.3.4');
+    T::true((int) $p['coupon_id'] > 0);
+});
+
+T::test('Promo per gateway: multiple gateways, and "all online gateways" (existing codes stay valid everywhere online)', function () use ($mkCoupon, $methodRow, $oxaMethod, $cmMethod, $manualId) {
+    $p2 = (int) Database::instance()->fetchColumn("SELECT id FROM payment_methods WHERE gateway = 'p2gateway'");
+    $mkCoupon('TWOGW', [$oxaMethod, $cmMethod]);
+    $legacy = $mkCoupon('LEGACY5'); // like codes created before this feature (all_gateways defaults to 1)
+    $u = Fx::user();
+    foreach ([$oxaMethod, $cmMethod] as $m) {
+        T::eq('2.0000', CouponService::validate('TWOGW', (int) $u['id'], '25', $methodRow($m))['bonus']);
+    }
+    T::throws(ValidationException::class, fn () => CouponService::validate('TWOGW', (int) $u['id'], '25', $methodRow($p2)), 'cannot be used with');
+    foreach ([$oxaMethod, $cmMethod, $p2] as $m) {
+        T::eq('2.0000', CouponService::validate('LEGACY5', (int) $u['id'], '25', $methodRow($m))['bonus'], 'legacy code on method ' . $m);
+    }
+    T::eq('1', (string) Database::instance()->fetchColumn('SELECT all_gateways FROM coupons WHERE id = ?', [$legacy]));
+});
+
+T::test('Promo per gateway: manual payment has no promo field and rejects promo codes server-side; old pending requests keep theirs', function () use ($mkCoupon, $methodRow, $manualId) {
+    $mkCoupon('ANYCODE');
+    $u = Fx::user();
+    T::throws(ValidationException::class, fn () => CouponService::validate('ANYCODE', (int) $u['id'], '25', $methodRow($manualId)), 'manual payments');
+    T::throws(ValidationException::class, fn () => ManualPaymentService::submit($u, $manualId, '25', 'UTR-PROMO-M1', null, '', 'ANYCODE'), 'manual payments');
+    T::eq(0, (int) Database::instance()->fetchColumn("SELECT COUNT(*) FROM manual_payment_requests WHERE reference = 'UTR-PROMO-M1'"));
+    // Manual request without a code still works.
+    $rid = ManualPaymentService::submit($u, $manualId, '25', 'UTR-PROMO-M2', null, '');
+    T::true($rid > 0);
+    // HTTP: the manual panel renders no promo field; a crafted POST with a code is refused.
+    login_as_user($u);
+    $html = http('GET', '/funds')->body();
+    preg_match('#<div class="card mb-2 method-panel" data-method="' . $manualId . '".*?</form>#s', $html, $m);
+    T::true(isset($m[0]) && !str_contains($m[0], 'name="coupon"'), 'no promo field for manual');
+    T::true(str_contains($html, 'id="promo-field"'), 'online gateways keep the field');
+    http('POST', '/funds/manual', ['_token' => csrf(), 'method_id' => $manualId, 'amount' => '25', 'reference' => 'UTR-PROMO-M3', 'coupon' => 'ANYCODE']);
+    T::eq(0, (int) Database::instance()->fetchColumn("SELECT COUNT(*) FROM manual_payment_requests WHERE reference = 'UTR-PROMO-M3'"));
+    T::true(str_contains(end($_SESSION['_flash'])['message'], 'manual payments'));
+    $j = json_decode(http('POST', '/funds/coupon', ['_token' => csrf(), 'code' => 'ANYCODE', 'amount' => '25', 'method_id' => $manualId], ['HTTP_ACCEPT' => 'application/json'])->body(), true);
+    T::eq(false, $j['ok']);
+    App\Services\Auth::logoutUser();
+    // A request submitted with a code before the upgrade keeps it when approved (existing records unchanged).
+    $cid = (int) Database::instance()->fetchColumn("SELECT id FROM coupons WHERE code = 'ANYCODE'");
+    $old = Database::instance()->insert('manual_payment_requests', ['user_id' => $u['id'], 'payment_method_id' => $manualId, 'amount' => '30', 'reference' => 'UTR-LEGACY-CPN', 'coupon_id' => $cid, 'status' => 'pending', 'created_at' => now(), 'updated_at' => now()]);
+    $bal = Fx::balance((int) $u['id']);
+    ManualPaymentService::approve($old, 1, null, '');
+    T::eq(App\Core\Money::add($bal, '32'), Fx::balance((int) $u['id']), '30 + legacy 2.00 promo bonus');
+});
+
+T::test('Promo per gateway: coupon check endpoint follows the selected gateway (switching re-validates)', function () use ($mkCoupon, $oxaMethod, $cmMethod) {
+    $mkCoupon('SWITCHME', [$cmMethod]);
+    $u = Fx::user();
+    login_as_user($u);
+    $check = static fn (int $m) => json_decode(http('POST', '/funds/coupon', ['_token' => csrf(), 'code' => 'SWITCHME', 'amount' => '40', 'method_id' => (string) $m], ['HTTP_ACCEPT' => 'application/json'])->body(), true);
+    $a = $check($cmMethod);
+    T::true($a['ok'] && str_contains($a['message'], '$2.00'));
+    $b = $check($oxaMethod);
+    T::true(!$b['ok'] && str_contains($b['error'], 'cannot be used with'), json_encode($b));
+    $c = json_decode(http('POST', '/funds/coupon', ['_token' => csrf(), 'code' => 'SWITCHME', 'amount' => '40'], ['HTTP_ACCEPT' => 'application/json'])->body(), true);
+    T::true(!$c['ok'] && str_contains($c['error'], 'payment method'), 'no method → refused');
+    App\Services\Auth::logoutUser();
+});
+
+T::test('Promo per gateway: duplicate / replayed callbacks credit the promo bonus once', function () use ($mkCoupon, $cmMethod, $cmFake, $cmWebhook) {
+    $mkCoupon('REPLAY2', [$cmMethod]);
+    $u = Fx::user();
+    $st = 'paid';
+    $cmFake($st);
+    $p = PaymentService::createGatewayPayment($u, $cmMethod, '40', 'REPLAY2', '1.2.3.4');
+    $wh = ['type' => 'payment', 'uuid' => $p['gateway_ref'], 'order_id' => 'PAY-' . $p['id'], 'amount' => '40.00', 'payment_amount' => '40.00', 'currency' => 'USD', 'status' => 'paid', 'is_final' => true, 'url' => 'https://x/y'];
+    for ($i = 0; $i < 3; $i++) {
+        $cmWebhook($wh);
+    }
+    PaymentService::complete((int) $p['id'], 'cron');
+    T::eq('42.000000', Fx::balance((int) $u['id']));
+    T::eq(1, (int) Database::instance()->fetchColumn('SELECT COUNT(*) FROM coupon_usage WHERE payment_id = ?', [$p['id']]));
+    T::eq(1, (int) Database::instance()->fetchColumn("SELECT COUNT(*) FROM transactions WHERE payment_id = ? AND type = 'bonus'", [$p['id']]));
+});
+
+T::test('Promo per gateway: admin selects gateways (validated, manual never offered), list shows them', function () use ($oxaMethod, $cmMethod, $manualId) {
+    $db = Database::instance();
+    $admin = (int) $db->fetchColumn('SELECT id FROM admins WHERE is_super = 1 LIMIT 1') ?: $db->insert('admins', ['username' => 'cpnadmin', 'email' => 'cpnadmin@example.com', 'password_hash' => 'x', 'status' => 'active', 'is_super' => 1, 'created_at' => now(), 'updated_at' => now()]);
+    login_as_admin($admin);
+    $base = ['_token' => csrf(), 'code' => 'ADMINGW', 'type' => 'percent', 'value' => '5', 'min_deposit' => '0', 'per_user_limit' => '1', 'status' => 'active'];
+    $html = http('GET', '/' . admin_path() . '/coupons')->body();
+    T::true(str_contains($html, 'Applicable payment gateways') && str_contains($html, 'value="' . $oxaMethod . '"') && !str_contains($html, 'name="payment_methods[]" value="' . $manualId . '"'));
+    http('POST', '/' . admin_path() . '/coupons/save', $base + ['gateway_scope' => 'selected']);
+    T::true(str_contains(end($_SESSION['_flash'])['message'], 'Select at least one payment gateway'));
+    http('POST', '/' . admin_path() . '/coupons/save', $base + ['gateway_scope' => 'selected', 'payment_methods' => [(string) $oxaMethod, (string) $cmMethod, (string) $manualId]]);
+    $id = (int) $db->fetchColumn("SELECT id FROM coupons WHERE code = 'ADMINGW'");
+    T::eq('0', (string) $db->fetchColumn('SELECT all_gateways FROM coupons WHERE id = ?', [$id]));
+    $ids = CouponService::methodIds($id);
+    sort($ids);
+    $want = [$oxaMethod, $cmMethod];
+    sort($want);
+    T::eq($want, $ids, 'manual ignored');
+    http('POST', '/' . admin_path() . '/coupons/save', $base + ['id' => (string) $id, 'gateway_scope' => 'all', 'payment_methods' => [(string) $oxaMethod]]);
+    T::eq(['1', []], [(string) $db->fetchColumn('SELECT all_gateways FROM coupons WHERE id = ?', [$id]), CouponService::methodIds($id)]);
+    T::true(str_contains(http('GET', '/' . admin_path() . '/coupons')->body(), 'All online'));
+    unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
 });

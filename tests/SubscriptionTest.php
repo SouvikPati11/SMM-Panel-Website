@@ -56,7 +56,7 @@ T::test('Subscription: validation — service must allow it, interval/cycles bou
     T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], $subService, $in, 5, 3), 'repeat');
     T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], $subService, $in, 24, 1), 'between 2');
     T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], $subService, $in, 24, 5000), 'between 2');
-    T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], $subService, ['link' => 'not a url', 'quantity' => '1000'], 24, 3), 'valid URL');
+    T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], $subService, ['link' => 'not a url', 'quantity' => '1000'], 24, 3), 'full link');
     $poor = Fx::user('1');
     T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $poor['id'], $subService, $in, 24, 3), 'Insufficient balance');
     T::eq(0, (int) Database::instance()->fetchColumn('SELECT COUNT(*) FROM subscriptions WHERE user_id = ?', [$poor['id']]), 'nothing created when delivery 1 cannot be charged');
@@ -266,7 +266,7 @@ T::test('Subscription service type: admin creates it with per-service schedule; 
     $subFake();
     $u = Fx::user('50');
     // Not orderable as a one-time order (web, mass order, API all go through OrderService::place).
-    T::throws(ValidationException::class, fn () => App\Services\OrderService::place((int) $u['id'], (int) $svc['id'], ['link' => 'https://instagram.com/x', 'quantity' => '1000']), 'is a subscription service');
+    T::throws(ValidationException::class, fn () => App\Services\OrderService::place((int) $u['id'], (int) $svc['id'], ['link' => 'https://instagram.com/x', 'quantity' => '1000']), 'can only be ordered as a subscription');
     // Schedule limited to the service's settings.
     T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], (int) $svc['id'], ['link' => 'https://instagram.com/x', 'quantity' => '1000'], 1, 5), 'every day, every week');
     T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], (int) $svc['id'], ['link' => 'https://instagram.com/x', 'quantity' => '1000'], 24, 2), 'between 3 and 10');
@@ -291,7 +291,7 @@ T::test('Subscription service type: admin creates it with per-service schedule; 
     $row = array_values(array_filter(json_decode($m[1] ?? '{}', true)['services'] ?? [], static fn ($x) => $x['id'] === (int) $svc['id']))[0] ?? [];
     T::eq([true, 'scheduled', ['24', '168'], 3, 10], [$row['so'] ?? null, $row['sm'] ?? null, $row['si'] ?? null, $row['smi'] ?? null, $row['sma'] ?? null], 'catalog data carries subscription-only + schedule');
     $q = http('POST', '/order/quote', ['_token' => csrf(), 'service' => $svc['id'], 'link' => 'https://instagram.com/x', 'quantity' => '1000'], ['HTTP_ACCEPT' => 'application/json']);
-    T::true(str_contains($q->body(), 'is a subscription service'), 'one-time quote refused');
+    T::true(str_contains($q->body(), 'can only be ordered as a subscription'), 'one-time quote refused');
     $q = http('POST', '/order/quote', ['_token' => csrf(), 'service' => $svc['id'], 'link' => 'https://instagram.com/x', 'quantity' => '1000', 'order_type' => 'subscription', 'sub_interval' => '24', 'sub_cycles' => '4'], ['HTTP_ACCEPT' => 'application/json']);
     T::eq(true, json_decode($q->body(), true)['ok'] ?? null, $q->body());
     App\Services\Auth::logoutUser();
@@ -299,5 +299,5 @@ T::test('Subscription service type: admin creates it with per-service schedule; 
     $apiList = json_decode(http('POST', '/api/v2', ['key' => $key, 'action' => 'services'], ['REMOTE_ADDR' => '203.0.113.77'])->body(), true);
     T::true(!in_array((int) $svc['id'], array_column($apiList, 'service'), true), 'not offered via API v2');
     $add = json_decode(http('POST', '/api/v2', ['key' => $key, 'action' => 'add', 'service' => $svc['id'], 'link' => 'https://instagram.com/x', 'quantity' => '1000'], ['REMOTE_ADDR' => '203.0.113.77'])->body(), true);
-    T::true(str_contains((string) ($add['error'] ?? ''), 'subscription service'), json_encode($add));
+    T::true(str_contains((string) ($add['error'] ?? ''), 'can only be ordered as a subscription'), json_encode($add));
 });

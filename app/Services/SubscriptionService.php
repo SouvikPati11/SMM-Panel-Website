@@ -143,11 +143,11 @@ final class SubscriptionService
         $min = $int('min', 'Minimum quantity');
         $max = $int('max', 'Maximum quantity');
         if ($min < $o['qty_min'] || $max > $o['qty_max'] || $min > $max) {
-            throw new ValidationException(sprintf('Quantity per post: minimum and maximum must be between %s and %s, and the minimum cannot exceed the maximum.', number_format($o['qty_min']), number_format($o['qty_max'])));
+            throw new ValidationException(sprintf('Amount per post must be between %s and %s, and the minimum cannot exceed the maximum.', number_format($o['qty_min']), number_format($o['qty_max'])));
         }
         $delayRaw = trim((string) ($in['delay'] ?? '0'));
         if (!preg_match('/^\d{1,4}$/', $delayRaw) || !isset($o['delays'][(int) $delayRaw])) {
-            throw new ValidationException('Choose one of the offered delays.');
+            throw new ValidationException('Choose a start delay from the offered delays list.');
         }
         $expiresAt = null;
         $expiry = trim((string) ($in['expiry'] ?? ''));
@@ -475,7 +475,7 @@ final class SubscriptionService
             throw new ValidationException('Choose how often the order should repeat (' . strtolower(implode(', ', $o['intervals'])) . ').');
         }
         if ($cycles < $o['min'] || $cycles > $o['max']) {
-            throw new ValidationException("Number of deliveries must be between {$o['min']} and {$o['max']}.");
+            throw new ValidationException("Choose between {$o['min']} and {$o['max']} repeats.");
         }
     }
 

@@ -1,15 +1,18 @@
 <?php $this->extend('layouts/admin'); use App\Helpers\Form; use App\Helpers\Platforms;
+// Only platforms that are ON can be assigned (Admin → Platforms). A category that already uses a
+// platform that is now OFF keeps it: the dialog adds that value, marked, so saving never changes it.
 $platformOptions = ['' => 'Auto-detect from the name'];
-foreach (Platforms::LIST as $k => [$label]) {
-    $platformOptions[$k] = $label . (in_array($k, Platforms::SHORTCUTS, true) ? '' : ' (shown under Other)');
+foreach (Platforms::enabled() as $k => $p) {
+    $platformOptions[$k] = $p['name'] . ($p['shortcut'] ? '' : ' (shown under Other)');
 }
-$platformOptions[Platforms::OTHER] = 'Other'; ?>
+$platformOptions[Platforms::OTHER] = 'Other';
+$disabledPlatforms = array_diff_key(Platforms::all(), Platforms::enabled()); ?>
 <div class="page-head"><div><h1>Categories</h1></div><button class="btn btn-primary" type="button" data-open-dialog="cat-dialog" data-reset><?= icon('plus') ?> Add category</button></div>
 <div class="card"><div class="table-wrap"><table class="table table-cards">
   <thead><tr><th>Order</th><th>Name</th><th>Platform</th><th class="num">Services</th><th>Status</th><th></th></tr></thead><tbody>
   <?php foreach ($categories as $c): ?>
     <tr><td data-label="Order" class="mono"><?= (int) $c['sort_order'] ?></td><td class="cell-main"><span class="cell-title heading-icon"><?= \App\Helpers\Platforms::icon(\App\Helpers\Platforms::forCategory($c)) ?> <span><?= e($c['name']) ?></span></span><div class="cell-sub">/<?= e($c['slug']) ?></div></td>
-      <td data-label="Platform" class="text-sm"><?= e(Platforms::label(Platforms::forCategory($c))) ?><?= ($c['platform'] ?? '') === '' ? ' <span class="text-muted">(auto)</span>' : '' ?></td>
+      <td data-label="Platform" class="text-sm"><?= e(Platforms::label(Platforms::forCategory($c))) ?><?= ($c['platform'] ?? '') === '' ? ' <span class="text-muted">(auto)</span>' : '' ?><?= !Platforms::categoryVisible($c) ? ' <span class="badge badge-muted no-dot" title="This platform is OFF in Admin → Platforms: the category is hidden from customers">Platform off</span>' : '' ?></td>
       <td data-label="Services" class="num"><a href="<?= e(admin_url('services?category=' . $c['id'])) ?>"><?= (int) $c['active'] ?> / <?= (int) $c['services'] ?></a></td><td data-label="Status"><?= status_badge($c['status']) ?></td>
       <td class="actions"><button class="btn btn-ghost btn-sm" type="button" data-open-dialog="cat-dialog" data-fill="<?= json_attr(['id' => $c['id'], 'name' => $c['name'], 'slug' => $c['slug'], 'sort_order' => $c['sort_order'], 'status' => $c['status'], 'description' => $c['description'], 'platform' => (string) ($c['platform'] ?? '')]) ?>"><?= icon('edit') ?></button>
         <form class="inline-form" method="post" action="<?= e(admin_url('categories/' . $c['id'] . '/delete')) ?>" data-confirm="Delete category?"><?= csrf_field() ?><button class="btn btn-ghost btn-sm" type="submit"><?= icon('trash') ?></button></form></td></tr>
@@ -19,7 +22,7 @@ $platformOptions[Platforms::OTHER] = 'Other'; ?>
   <form method="post" action="<?= e(admin_url('categories/save')) ?>"><?= csrf_field() ?><input type="hidden" name="id" value="">
     <?= Form::input('name', 'Name', '', ['required' => true]) ?>
     <div class="form-grid"><?= Form::input('slug', 'Slug', '', ['hint' => 'Auto if empty']) ?><?= Form::input('sort_order', 'Sort order', '0', ['type' => 'number']) ?></div>
-    <div class="form-grid"><?= Form::select('platform', 'Platform', $platformOptions, '', ['hint' => 'Used for icons and the New order shortcuts.']) ?><?= Form::select('status', 'Status', ['active' => 'Active', 'hidden' => 'Hidden'], 'active') ?></div>
+    <div class="form-grid"><?= Form::select('platform', 'Platform', $platformOptions + array_map(static fn ($p) => $p['name'] . ' (off — keeps the current setting)', array_intersect_key($disabledPlatforms, array_flip(array_filter(array_column($categories, 'platform'))))), '', ['hint' => 'Used for icons and New Order shortcuts. Manage the list in Platforms.']) ?><?= Form::select('status', 'Status', ['active' => 'Active', 'hidden' => 'Hidden'], 'active') ?></div>
     <?= Form::input('description', 'Description', '') ?>
     <button class="btn btn-primary btn-block" type="submit">Save</button></form>
 </div></dialog>

@@ -527,12 +527,12 @@
       submitBtn.disabled = !s;
       if (!s) { summary.hidden = true; return; }
       summary.hidden = false;
-      $('#svc-rate').textContent = rateFmt(toMicro(s.r)) + (s.pk ? '' : ' / 1K');
+      $('#svc-rate').textContent = rateFmt(toMicro(s.r)) + (s.pk ? ' per package' : '');
       $('#svc-min').textContent = s.pk ? '—' : Number(s.mi).toLocaleString();
       $('#svc-max').textContent = s.pk ? '—' : Number(s.ma).toLocaleString();
       $('#svc-time').textContent = s.t || '—';
       var flags = $('#svc-flags'); flags.innerHTML = '';
-      [[s.rf, 'Refill'], [s.cn, 'Cancel'], [s.df, 'Drip-feed'], [s.sb, s.so ? 'Subscription only' : 'Subscription']].forEach(function (f) {
+      [[s.rf, 'Refill'], [s.cn, 'Can be cancelled'], [s.df, 'Gradual delivery'], [s.sb, s.so ? 'Subscription only' : 'Can repeat']].forEach(function (f) {
         if (!f[0]) return;
         var b = document.createElement('span'); b.className = 'badge badge-success'; b.textContent = f[1]; flags.appendChild(b);
       });
@@ -553,7 +553,7 @@
         subCyc.min = s.smi; subCyc.max = s.sma;
         var v = parseInt(subCyc.value, 10) || 0;
         if (v < s.smi || v > s.sma) subCyc.value = Math.min(Math.max(v, s.smi), s.sma);
-        $('#sub-cycles-hint').textContent = s.smi + '–' + s.sma + ' deliveries';
+        $('#sub-cycles-hint').textContent = 'Between ' + s.smi + ' and ' + s.sma + ' times';
       }
       show('field-quantity', ['default', 'comment_likes', 'poll', 'keywords', 'subscription'].indexOf(type) >= 0);
       if (s.sm === 'posts') setupPosts(s);
@@ -563,7 +563,7 @@
       show('field-answer', type === 'poll');
       show('field-keywords', type === 'keywords');
       if (qty) { qty.min = s.mi; qty.max = s.ma; }
-      $('#qty-hint').textContent = 'Min ' + Number(s.mi).toLocaleString() + ' · Max ' + Number(s.ma).toLocaleString();
+      $('#qty-hint').textContent = 'Minimum ' + Number(s.mi).toLocaleString() + ' · Maximum ' + Number(s.ma).toLocaleString();
       onType();
       loadDescription(s.id);
       try { history.replaceState(null, '', '?service=' + s.id); } catch (e) {}
@@ -579,20 +579,20 @@
       show('field-dripfeed', !!(s && s.df) && !sub);
       if ((!s || !s.df || sub) && drip) drip.checked = false;
       show('dripfeed-fields', !!(drip && drip.checked));
-      $('#quantity-label').textContent = sub && !posts ? 'Quantity per delivery' : 'Quantity';
+      $('#quantity-label').textContent = sub && !posts ? 'Quantity each time' : 'Quantity';
       $('#order-submit-label').textContent = sub ? 'Review subscription' : 'Review order';
       calc();
     }
 
     function loadDescription(id) {
       if (descCache[id] !== undefined) { renderDesc(descCache[id]); return; }
-      descEl.innerHTML = '<span class="spinner spinner-sm" aria-hidden="true"></span> <span class="text-muted">Loading description…</span>';
+      descEl.innerHTML = '<span class="spinner spinner-sm" aria-hidden="true"></span> <span class="text-muted">Loading details…</span>';
       fetch(orderForm.getAttribute('data-info-url').replace('__ID__', encodeURIComponent(id)), { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : { description: '' }; })
         .then(function (j) { descCache[id] = j.description || ''; if (String(svcSel.value) === String(id)) renderDesc(descCache[id]); })
-        .catch(function () { if (String(svcSel.value) === String(id)) descEl.textContent = 'Description unavailable.'; });
+        .catch(function () { if (String(svcSel.value) === String(id)) descEl.textContent = 'Details could not be loaded. You can still place the order.'; });
     }
-    function renderDesc(text) { descEl.textContent = text || 'No description provided for this service.'; }
+    function renderDesc(text) { descEl.textContent = text || 'No extra details for this service.'; }
 
     function lines(id) {
       var el = $('#' + id); if (!el) return 0;
@@ -615,11 +615,11 @@
       if (isPosts()) {
         // Reserve = max × (new + old posts) × rate; the server recalculates it and refunds what is unused.
         total = rate * BigInt(num('sub_max')) * BigInt(num('sub_posts') + num('sub_old_posts')) / 1000n;
-        $('#charge-label').textContent = 'Reserved now (maximum)';
-        $('#charge-note').textContent = 'Unused posts are refunded automatically';
+        $('#charge-label').textContent = 'Held from your balance now (maximum)';
+        $('#charge-note').textContent = 'You only pay for what is delivered; the rest comes back automatically.';
       } else {
-        $('#charge-label').textContent = sub ? 'Charge per delivery' : 'Estimated charge';
-        $('#charge-note').textContent = sub && cycles ? '× ' + cycles + ' deliveries ≈ ' + money(total * BigInt(cycles)) + ' in total' : '';
+        $('#charge-label').textContent = sub ? 'Price each time' : 'Price';
+        $('#charge-note').textContent = sub && cycles ? '× ' + cycles + ' times ≈ ' + money(total * BigInt(cycles)) + ' in total' : '';
       }
       chargeEl.textContent = money(total);
       $('#charge-warning').hidden = total <= toMicro(orderForm.getAttribute('data-balance'));
@@ -638,10 +638,10 @@
         .then(function (res) {
           if (seq !== quoteSeq) return null; // a newer request superseded this one
           spinner.hidden = true; chargeEl.classList.remove('is-updating');
-          if (!res.ok || !res.j.ok) { lastQuote = null; return { error: res.j.error || 'Could not calculate the price.' }; }
+          if (!res.ok || !res.j.ok) { lastQuote = null; return { error: res.j.error || 'We could not work out the price. Check the fields above.' }; }
           lastQuote = res.j;
           chargeEl.textContent = res.j.subscription ? res.j.subscription.per_delivery : (res.j.posts ? res.j.posts.reserve : res.j.charge);
-          if (res.j.subscription) $('#charge-note').textContent = '× ' + res.j.subscription.cycles + ' deliveries ≈ ' + res.j.subscription.estimated_total + ' in total';
+          if (res.j.subscription) $('#charge-note').textContent = '× ' + res.j.subscription.cycles + ' times ≈ ' + res.j.subscription.estimated_total + ' in total';
           $('#charge-warning').hidden = !res.j.insufficient;
           quoteErr.hidden = true;
           return res.j;
@@ -683,36 +683,37 @@
       if (q.posts) {
         row(dl, 'Username', q.posts.username);
         row(dl, 'New posts', String(q.posts.posts));
-        if (q.posts.old_posts) row(dl, 'Old posts', String(q.posts.old_posts));
-        row(dl, 'Quantity', q.posts.quantity);
-        row(dl, 'Delay', q.posts.delay);
-        row(dl, 'Expiry', q.posts.expiry);
-        row(dl, 'Rate', q.rate);
-        row(dl, 'Cost per post', q.posts.per_post);
-        row(dl, 'Reserved now (maximum)', q.posts.reserve);
-        if (q.charge_base && q.charge_base !== q.charge) row(dl, 'Charged in account currency', q.charge_base);
+        if (q.posts.old_posts) row(dl, 'Recent posts included', String(q.posts.old_posts));
+        row(dl, 'Amount per post', q.posts.quantity);
+        row(dl, 'Start after', q.posts.delay);
+        row(dl, 'Ends on', q.posts.expiry);
+        row(dl, 'Price', q.rate);
+        row(dl, 'Price per post', q.posts.per_post);
+        row(dl, 'Held now (maximum)', q.posts.reserve);
+        if (q.charge_base && q.charge_base !== q.charge) row(dl, 'Taken from your balance', q.charge_base);
       } else {
       row(dl, byId[svcSel.value] && byId[svcSel.value].l ? byId[svcSel.value].l : 'Link', q.link);
-      row(dl, q.subscription ? 'Quantity per delivery' : 'Quantity', Number(q.quantity).toLocaleString() + (q.runs ? ' × ' + q.runs + ' runs' : ''));
+      row(dl, q.subscription ? 'Quantity each time' : 'Quantity', Number(q.quantity).toLocaleString() + (q.runs ? ' × ' + q.runs + ' rounds' : ''));
       Object.keys(q.extra || {}).forEach(function (k) { if (k !== 'comments' && k !== 'usernames') row(dl, k.replace(/_/g, ' '), q.extra[k]); });
-      row(dl, 'Rate', q.rate);
+      row(dl, 'Price', q.rate);
       if (q.subscription) {
-        row(dl, 'Repeats', q.subscription.interval + ' · ' + q.subscription.cycles + ' deliveries');
-        row(dl, 'Charged now', q.subscription.per_delivery);
-        row(dl, 'Estimated total', q.subscription.estimated_total);
+        row(dl, 'Repeats', q.subscription.interval + ' · ' + q.subscription.cycles + ' times');
+        row(dl, 'Paid now', q.subscription.per_delivery);
+        row(dl, 'Total if every repeat runs', q.subscription.estimated_total);
       } else {
-        row(dl, 'Total charge', q.charge);
+        row(dl, 'Total to pay', q.charge);
       }
-      if (q.charge_base && q.charge_base !== q.charge) row(dl, 'Charged in account currency', q.charge_base);
+      if (q.charge_base && q.charge_base !== q.charge) row(dl, 'Taken from your balance', q.charge_base);
       }
       row(dl, 'Average time', q.service.average_time);
-      row(dl, 'Refill / cancel', (q.service.refill ? 'Refill available' : 'No refill') + ' · ' + (q.service.cancel ? 'cancel available' : 'no cancel'));
+      row(dl, 'Refill & cancel', (q.service.refill ? 'Refill available' : 'No refill') + ' · ' + (q.service.cancel ? 'can be cancelled' : 'cannot be cancelled'));
       var notes = $('#confirm-notes'); notes.innerHTML = '';
       (q.notes || []).forEach(function (n) { var li = document.createElement('li'); li.textContent = n; notes.appendChild(li); });
       $('#confirm-insufficient').hidden = !q.insufficient;
       $('#confirm-error').hidden = true;
       confirmBtn.disabled = !!q.insufficient;
-      $('#order-confirm-title').textContent = q.subscription || q.posts ? 'Confirm your subscription' : 'Confirm your order';
+      $('#order-confirm-title').textContent = q.subscription || q.posts ? 'Check your subscription' : 'Check your order';
+      var csl = $('#confirm-submit-label'); if (csl) csl.textContent = q.subscription || q.posts ? 'Start subscription' : 'Place order';
       $('#confirm-review').hidden = false; $('#confirm-done').hidden = true;
       if (dialog.showModal && !dialog.open) dialog.showModal(); else dialog.setAttribute('open', '');
       confirmBtn.focus();
@@ -739,20 +740,21 @@
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
           busy = false; confirmBtn.classList.remove('is-loading');
-          if (!res.ok) { $('#confirm-error').textContent = res.j.error || 'The order could not be placed.'; $('#confirm-error').hidden = false; confirmBtn.disabled = false; return; }
+          if (!res.ok) { $('#confirm-error').textContent = res.j.error || 'Your order could not be placed. Please try again.'; $('#confirm-error').hidden = false; confirmBtn.disabled = false; return; }
           var j = res.j;
           if (j.form_key) orderForm.querySelector('[name="form_key"]').value = j.form_key; // next order gets a fresh idempotency key
-          $('#done-title').textContent = j.type === 'subscription' ? 'Subscription #' + j.subscription_id + ' created' : (j.ok ? 'Order #' + j.order_id + ' placed' : 'Order #' + j.order_id + ' was not accepted');
+          $('#done-title').textContent = j.type === 'subscription' ? 'Subscription #' + j.subscription_id + ' started' : (j.ok ? 'Order #' + j.order_id + ' placed' : 'Order #' + j.order_id + ' could not start');
           $('#done-text').textContent = j.message || '';
           $('#done-view').href = j.url;
+          $('#done-view').textContent = j.type === 'subscription' ? 'View subscription' : 'View order';
           $('.done-icon', dialog).classList.toggle('is-error', !j.ok);
           $('#confirm-review').hidden = true; $('#confirm-done').hidden = false;
-          $('#order-confirm-title').textContent = j.ok ? 'Success' : 'Order not accepted';
+          $('#order-confirm-title').textContent = j.ok ? 'All done' : 'Order not started';
           $('#done-view').focus();
         })
         .catch(function () {
           busy = false; confirmBtn.classList.remove('is-loading'); confirmBtn.disabled = false;
-          $('#confirm-error').textContent = 'Network error. Check "My orders" before retrying — resubmitting the same form never creates a duplicate.';
+          $('#confirm-error').textContent = 'We could not reach the server. Check "My orders" before trying again: the same order is never placed twice.';
           $('#confirm-error').hidden = false;
         });
     });
@@ -769,7 +771,7 @@
         if (q.length < 2) { results.hidden = true; return; }
         var found = data.services.filter(function (s) { return String(s.id) === q || s.n.toLowerCase().indexOf(q) >= 0; }).slice(0, 40);
         results.hidden = false;
-        if (!found.length) { results.innerHTML = '<div class="text-muted text-sm" style="padding:12px 14px">No services found</div>'; return; }
+        if (!found.length) { results.innerHTML = '<div class="text-muted text-sm" style="padding:12px 14px">No services match your search. Try a shorter word or a service ID.</div>'; return; }
         found.forEach(function (s) {
           var b = document.createElement('button');
           b.type = 'button';
@@ -791,14 +793,23 @@
     }
 
     // Rich pickers: platform icons, prices, min/max and badges in the lists (native selects stay in the form).
-    richSelect(catSel, { icon: function (o) { return icons[o.getAttribute('data-platform')] || icons.other || ''; }, search: 'Search categories', empty: 'No categories for this platform' });
-    richSelect(svcSel, { search: 'Search services in this category', empty: 'No services in this category' });
+    richSelect(catSel, { icon: function (o) { return icons[o.getAttribute('data-platform')] || icons.other || ''; }, search: 'Find a category', empty: 'No categories for this platform yet' });
+    richSelect(svcSel, { search: 'Find a service in this category', empty: 'No services in this category yet' });
 
     // initial state
     var pre = orderForm.getAttribute('data-preselect');
     if (pre && byId[pre]) { catSel.value = byId[pre].c; fillServices(byId[pre].c, pre); }
     else if (catSel.value) { fillServices(catSel.value); }
   }
+
+  // ------------------------------------------------------------ admin platforms: live On/Off badge
+  $$('.platform-table input[name^="enabled["]').forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      var tr = cb.closest('tr'), st = $('.platform-state', tr);
+      if (tr) tr.classList.toggle('is-off', !cb.checked);
+      if (st) st.innerHTML = cb.checked ? '<span class="badge badge-success">On</span>' : '<span class="badge badge-muted">Off</span>';
+    });
+  });
 
   // ------------------------------------------------------------ mass order line counter
   var mass = $('#mass-orders');
@@ -859,14 +870,23 @@
       });
     };
     $$('input[name="amount"]', fundsForm).forEach(function (i) { i.addEventListener('input', bonusPreview); });
-    radios.forEach(function (r) { r.addEventListener('change', sync); r.addEventListener('change', bonusPreview); });
+    // Promo codes can be limited to certain gateways: after switching gateway, re-check an entered
+    // code (the server re-checks it again on submit) so an invalid code is never shown as applied.
+    var recheckCoupon = function () {
+      var gw = $('#gateway-form'), code = gw && $('[name="coupon"]', gw), out = gw && $('.coupon-result', gw), btn = gw && $('[data-coupon-check]', gw);
+      if (!code || !out) return;
+      out.textContent = ''; out.className = 'coupon-result hint';
+      if (code.value.trim() && !gw.hidden && btn) btn.click();
+    };
+    radios.forEach(function (r) { r.addEventListener('change', sync); r.addEventListener('change', bonusPreview); r.addEventListener('change', recheckCoupon); });
     sync();
     bonusPreview();
     $$('[data-coupon-check]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var form = btn.closest('form');
         var out = form.querySelector('.coupon-result');
-        var body = new URLSearchParams({ code: form.querySelector('[name="coupon"]').value, amount: form.querySelector('[name="amount"]').value, _token: csrf });
+        var mid = form.querySelector('.method-id');
+        var body = new URLSearchParams({ code: form.querySelector('[name="coupon"]').value, amount: form.querySelector('[name="amount"]').value, method_id: mid ? mid.value : '', _token: csrf });
         out.textContent = 'Checking…'; out.className = 'coupon-result hint';
         fetch(btn.getAttribute('data-coupon-check'), { method: 'POST', body: body, headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': csrf }, credentials: 'same-origin' })
           .then(function (r) { return r.json(); })

@@ -59,6 +59,12 @@ final class Request
         return $this->path;
     }
 
+    /** Path plus the query string, e.g. "/admin/settings?tab=orders" (for returning to the same page). */
+    public function pathWithQuery(): string
+    {
+        return $this->path . ($this->query ? '?' . http_build_query($this->query) : '');
+    }
+
     public function isPost(): bool
     {
         return $this->method === 'POST';

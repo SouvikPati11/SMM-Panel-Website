@@ -350,6 +350,52 @@ final class ServiceController extends Controller
         return Response::redirect(admin_url('services'));
     }
 
+    /** Admin → Platforms: ON/OFF, New Order shortcut and display name of every platform. */
+    public function platforms(Request $request): Response
+    {
+        $usage = [];
+        foreach (Database::instance()->fetchAll("SELECT c.id, c.name, c.platform, COUNT(s.id) AS services FROM categories c LEFT JOIN services s ON s.category_id = c.id GROUP BY c.id, c.name, c.platform") as $c) {
+            $k = \App\Helpers\Platforms::forCategory($c);
+            $usage[$k]['categories'] = ($usage[$k]['categories'] ?? 0) + 1;
+            $usage[$k]['services'] = ($usage[$k]['services'] ?? 0) + (int) $c['services'];
+        }
+        return $this->view('admin/services/platforms', ['title' => 'Platforms', 'platforms' => \App\Helpers\Platforms::all(), 'usage' => $usage]);
+    }
+
+    public function savePlatforms(Request $request): Response
+    {
+        $db = Database::instance();
+        $post = $request->post();
+        $changes = [];
+        $i = 0;
+        foreach (\App\Helpers\Platforms::all() as $key => $p) {
+            $name = trim((string) ($post['name'][$key] ?? $p['name']));
+            if ($name === '' || mb_strlen($name) > 60) {
+                throw new ValidationException('Each platform needs a name of up to 60 characters.');
+            }
+            $row = [
+                'name' => $name,
+                'status' => !empty($post['enabled'][$key]) ? 'active' : 'disabled',
+                'shortcut' => !empty($post['shortcut'][$key]) ? 1 : 0,
+                'sort_order' => $i++ * 10,
+            ];
+            if ($row['name'] !== $p['name'] || $row['status'] !== $p['status'] || (bool) $row['shortcut'] !== $p['shortcut']) {
+                $changes[$key] = ['status' => [$p['status'], $row['status']], 'shortcut' => [(int) $p['shortcut'], $row['shortcut']], 'name' => [$p['name'], $row['name']]];
+            }
+            $db->query(
+                'INSERT INTO platforms (`key`, name, status, shortcut, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE name = VALUES(name), status = VALUES(status), shortcut = VALUES(shortcut), updated_at = VALUES(updated_at)',
+                [$key, $row['name'], $row['status'], $row['shortcut'], $row['sort_order'], now()]
+            );
+        }
+        \App\Helpers\Platforms::reset();
+        if ($changes) {
+            AuditService::log('platforms.update', 'platforms', 'all', $changes);
+        }
+        $this->success($changes ? 'Platforms saved. Customers see the change immediately.' : 'No changes.');
+        return Response::redirect(admin_url('platforms'));
+    }
+
     public function categories(Request $request): Response
     {
         $cats = Database::instance()->fetchAll(
@@ -372,6 +418,11 @@ final class ServiceController extends Controller
             'sort_order' => (int) ($data['sort_order'] ?: 0), 'status' => $request->str('status') === 'hidden' ? 'hidden' : 'active', 'updated_at' => now(),
             'platform' => \App\Helpers\Platforms::normalize($request->str('platform')) ?: null, // null = detect from the name
         ];
+        // A platform that is OFF cannot be newly assigned (a category that already has it keeps it).
+        $current = $id ? $db->fetchColumn('SELECT platform FROM categories WHERE id = ?', [$id]) : null;
+        if ($row['platform'] !== null && $row['platform'] !== $current && !\App\Helpers\Platforms::isEnabled($row['platform'])) {
+            throw new ValidationException(\App\Helpers\Platforms::label($row['platform']) . ' is turned off in Platforms. Turn it on first, or choose another platform.');
+        }
         if ($id) {
             $db->update('categories', $row, ['id' => $id]);
         } else {

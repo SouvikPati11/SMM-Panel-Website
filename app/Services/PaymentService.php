@@ -141,7 +141,7 @@ final class PaymentService
 
         $couponId = null;
         if (trim($couponCode) !== '') {
-            $couponId = (int) CouponService::validate($couponCode, (int) $user['id'], $amount)['coupon']['id'];
+            $couponId = (int) CouponService::validate($couponCode, (int) $user['id'], $amount, $method)['coupon']['id'];
         }
 
         // Anti-abuse: cap simultaneous open invoices per user.

@@ -41,13 +41,17 @@ final class SeoService
         $site = site_name();
         $title = $page['title'] ?? null;
         return [
-            'title' => $title ? $title . ' — ' . $site : (string) setting('seo_title', $site),
+            // 'title_exact' is used as-is (e.g. a custom SEO title); 'title' gets " — Site".
+            'title' => isset($page['title_exact']) && $page['title_exact'] !== '' ? (string) $page['title_exact'] : ($title ? $title . ' — ' . $site : (string) setting('seo_title', $site)),
             'description' => mb_substr(trim(strip_tags((string) ($page['description'] ?? setting('seo_description', '')))), 0, 300),
             'canonical' => $page['canonical'] ?? url(\App\Core\App::request()?->path() ?? '/'),
             'image' => $page['image'] ?? (setting('seo_og_image') ? upload_url((string) setting('seo_og_image')) : self::defaultImage()),
             'type' => $page['type'] ?? 'website',
             'robots' => $page['robots'] ?? 'index,follow',
             'jsonld' => $page['jsonld'] ?? [],
+            'image_alt' => $page['image_alt'] ?? null,
+            // Extra <meta property=…> tags, e.g. article:published_time (name => value or list of values)
+            'og_extra' => $page['og_extra'] ?? [],
         ];
     }
 
@@ -101,8 +105,15 @@ final class SeoService
         }
         if (setting('blog_enabled', '1') === '1') {
             $urls[] = ['/blog', '0.7', null];
-            foreach ($db->fetchAll("SELECT slug, updated_at FROM blog_posts WHERE status = 'published' AND published_at <= ? ORDER BY published_at DESC LIMIT 5000", [now()]) as $p) {
-                $urls[] = ['/blog/' . $p['slug'], '0.6', $p['updated_at']];
+            // Live posts only (drafts and scheduled posts are excluded), and only those that are
+            // indexable and canonical to their own URL.
+            foreach ($db->fetchAll("SELECT slug, updated_at, robots_index, canonical_url FROM blog_posts WHERE status = 'published' AND published_at <= ? ORDER BY published_at DESC LIMIT 5000", [now()]) as $p) {
+                if (BlogSeo::inSitemap($p)) {
+                    $urls[] = ['/blog/' . rawurlencode($p['slug']), '0.6', $p['updated_at']];
+                }
+            }
+            foreach ($db->fetchAll("SELECT c.slug, MAX(p.updated_at) AS mod_at FROM blog_categories c JOIN blog_posts p ON p.category_id = c.id AND p.status = 'published' AND p.published_at <= ? GROUP BY c.id, c.slug", [now()]) as $c) {
+                $urls[] = ['/blog/category/' . rawurlencode($c['slug']), '0.5', $c['mod_at']];
             }
         }
         $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";

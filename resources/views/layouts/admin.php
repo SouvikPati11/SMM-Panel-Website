@@ -20,6 +20,7 @@ $nav = [
     ['Catalog', null],
     ['services', 'Services', 'layers', 'services.manage'],
     ['categories', 'Categories', 'tag', 'services.manage'],
+    ['platforms', 'Platforms', 'globe', 'services.manage'],
     ['providers', 'Providers', 'server', 'providers.manage'],
     ['Finance', null],
     ['payments', 'Payments', 'card', 'payments.view'],

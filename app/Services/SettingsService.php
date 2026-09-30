@@ -115,7 +115,7 @@ final class SettingsService
         'admin_notify_email' => '',
     ];
 
-    public const SECRET_KEYS = ['mail_password', 'google_client_secret', 'recaptcha_secret_key'];
+    public const SECRET_KEYS = ['mail_password', 'google_client_secret', 'recaptcha_secret_key', 'cron_key'];
 
     public static function boot(): void
     {

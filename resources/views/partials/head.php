@@ -17,6 +17,9 @@ $favicon = setting('site_favicon');
 <meta property="og:url" content="<?= e($meta['canonical']) ?>">
 <meta property="og:locale" content="en_US">
 <?php if ($meta['image']): ?><meta property="og:image" content="<?= e($meta['image']) ?>"><?php if ($meta['image'] === \App\Services\SeoService::defaultImage()): ?><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="<?= e(site_name()) ?> — social media growth panel"><?php endif ?><meta name="twitter:image" content="<?= e($meta['image']) ?>"><?php endif ?>
+<?php if (!empty($meta['image_alt'])): ?><meta property="og:image:alt" content="<?= e($meta['image_alt']) ?>"><meta name="twitter:image:alt" content="<?= e($meta['image_alt']) ?>"><?php endif ?>
+<?php foreach ((array) ($meta['og_extra'] ?? []) as $prop => $vals): foreach ((array) $vals as $v): if ((string) $v !== ''): ?><meta property="<?= e($prop) ?>" content="<?= e((string) $v) ?>">
+<?php endif; endforeach; endforeach ?>
 <meta name="twitter:card" content="<?= $meta['image'] ? 'summary_large_image' : 'summary' ?>">
 <meta name="twitter:title" content="<?= e($meta['title']) ?>">
 <?php if ($meta['description'] !== ''): ?><meta name="twitter:description" content="<?= e($meta['description']) ?>"><?php endif ?>

@@ -50,6 +50,11 @@ final class ContentController extends Controller
             'content' => HtmlSanitizer::clean((string) ($request->post()['content'] ?? '')),
             'seo_title' => $data['seo_title'] ?: null,
             'seo_description' => $data['seo_description'] ?: null,
+            'seo_keyword' => $data['seo_keyword'] ?: null,
+            'canonical_url' => $canonical !== '' ? $canonical : null,
+            // Absent from the request (older forms/tools) = keep the current value (new posts: indexable).
+            'robots_index' => array_key_exists('robots_index', $request->post()) ? ($request->bool('robots_index') ? 1 : 0) : (int) ($existing['robots_index'] ?? 1),
+            'robots_follow' => array_key_exists('robots_follow', $request->post()) ? ($request->bool('robots_follow') ? 1 : 0) : (int) ($existing['robots_follow'] ?? 1),
             'status' => $request->str('status') === 'draft' ? 'draft' : 'published',
             'show_in_footer' => $request->bool('show_in_footer') ? 1 : 0,
             'updated_at' => now(),
@@ -143,11 +148,19 @@ final class ContentController extends Controller
         $db = Database::instance();
         $id = $request->int('id');
         $existing = $id ? $db->fetch('SELECT * FROM blog_posts WHERE id = ?', [$id]) : null;
-        $data = Validator::check($request->post(), ['title' => 'required|max:220', 'excerpt' => 'max:500', 'seo_title' => 'max:200', 'seo_description' => 'max:320']);
+        $data = Validator::check($request->post(), ['title' => 'required|max:220', 'excerpt' => 'max:500', 'seo_title' => 'max:200', 'seo_description' => 'max:320', 'seo_keyword' => 'max:100', 'canonical_url' => 'max:500']);
         if ($id && !$existing) {
             $this->notFound();
         }
-        $slug = mb_substr(slugify($request->str('slug') ?: $data['title']), 0, 200);
+        // Clean slug from the given slug or the title; titles without latin letters/digits get a stable fallback.
+        $slug = trim(mb_substr(slugify($request->str('slug') ?: $data['title']), 0, 200), '-');
+        if ($slug === '') {
+            $slug = $existing['slug'] ?? ('post-' . gmdate('Ymd-His'));
+        }
+        $canonical = trim((string) ($data['canonical_url'] ?? ''));
+        if ($canonical !== '' && !\App\Services\BlogSeo::validCanonical($canonical)) {
+            throw new ValidationException('The canonical URL must be a full address starting with https:// (or http://). Leave it empty to use this post\'s own URL.');
+        }
         if ($db->fetchColumn('SELECT id FROM blog_posts WHERE slug = ? AND id <> ?', [$slug, $id])) {
             throw new ValidationException('Another post already uses the address /blog/' . $slug . '. Change the slug.');
         }
@@ -176,6 +189,11 @@ final class ContentController extends Controller
             'content' => $content,
             'seo_title' => $data['seo_title'] ?: null,
             'seo_description' => $data['seo_description'] ?: null,
+            'seo_keyword' => $data['seo_keyword'] ?: null,
+            'canonical_url' => $canonical !== '' ? $canonical : null,
+            // Absent from the request (older forms/tools) = keep the current value (new posts: indexable).
+            'robots_index' => array_key_exists('robots_index', $request->post()) ? ($request->bool('robots_index') ? 1 : 0) : (int) ($existing['robots_index'] ?? 1),
+            'robots_follow' => array_key_exists('robots_follow', $request->post()) ? ($request->bool('robots_follow') ? 1 : 0) : (int) ($existing['robots_follow'] ?? 1),
             'status' => $status,
             'published_at' => $publishedAt,
             'updated_at' => now(),
@@ -189,9 +207,22 @@ final class ContentController extends Controller
             $row['featured_image'] = null;
             $oldImage = $existing['featured_image'] ?? null;
         }
+        $oldOg = null;
+        if ($file = $request->file('og_image')) {
+            $row['og_image'] = UploadService::storePublicImage($file, 'blog');
+            $oldOg = $existing['og_image'] ?? null;
+        } elseif ($request->bool('remove_og_image')) {
+            $row['og_image'] = null;
+            $oldOg = $existing['og_image'] ?? null;
+        }
         $db->transaction(function (Database $db) use (&$id, $existing, $row, $request): void {
             if ($existing) {
                 $db->update('blog_posts', $row, ['id' => $id]);
+                // Old address of a renamed post redirects (301) to the new one.
+                if ($existing['slug'] !== $row['slug']) {
+                    $db->query('INSERT INTO blog_slug_redirects (old_slug, post_id, created_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE post_id = VALUES(post_id)', [$existing['slug'], $id, now()]);
+                }
+                $db->query('DELETE FROM blog_slug_redirects WHERE old_slug = ?', [$row['slug']]); // a live slug never redirects
             } else {
                 $id = $db->insert('blog_posts', $row + ['admin_id' => Auth::adminId(), 'created_at' => now()]);
             }
@@ -204,6 +235,7 @@ final class ContentController extends Controller
             }
         });
         UploadService::deletePublic($oldImage);
+        UploadService::deletePublic($oldOg);
         AuditService::log('blog.save', 'blog_post', $id, ['status' => $status]);
         $live = $status === 'published' && $publishedAt !== null && $publishedAt <= now();
         $this->success($status === 'draft' ? 'Draft saved.' : ($live ? 'Post published.' : 'Post scheduled for ' . fmt_date($publishedAt) . '.'));
@@ -228,7 +260,9 @@ final class ContentController extends Controller
     public function deletePost(Request $request, int $id): Response
     {
         $db = Database::instance();
-        UploadService::deletePublic($db->fetchColumn('SELECT featured_image FROM blog_posts WHERE id = ?', [$id]));
+        $imgs = $db->fetch('SELECT featured_image, og_image FROM blog_posts WHERE id = ?', [$id]) ?: [];
+        UploadService::deletePublic($imgs['featured_image'] ?? null);
+        UploadService::deletePublic($imgs['og_image'] ?? null);
         $db->delete('blog_posts', ['id' => $id]);
         AuditService::log('blog.delete', 'blog_post', $id);
         $this->success('Post deleted.');

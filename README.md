@@ -299,6 +299,14 @@ threshold, so nobody is auto-promoted.
 - a platform per category, filled once from the category name;
 - reCAPTCHA and TikTok settings (reCAPTCHA OFF by default).
 
+`2026_10_27_platforms_coupon_gateways_blog_seo` adds:
+
+- the `platforms` table (every known platform ON, the ten default New Order cards);
+- `coupons.all_gateways` + `coupon_payment_methods` (existing codes stay valid on every online gateway);
+- blog SEO columns (`seo_keyword`, `canonical_url`, `og_image`, `robots_index`, `robots_follow`, with existing posts indexable) and `blog_slug_redirects`.
+
+Existing rows are never modified, and a second run is a no-op.
+
 Without SSH, use **Admin → System health → Apply database
 upgrades**, which runs the same migrations.
 
@@ -413,7 +421,7 @@ php tests/run.php            # all suites
 php tests/run.php Payment    # one suite
 ```
 
-The suite drops and recreates every table in the test database, then runs 241
+The suite drops and recreates every table in the test database, then runs 265
 integration tests through the real services and the full HTTP kernel, with a
 fake HTTP transport standing in for providers and gateways:
 
@@ -435,6 +443,11 @@ fake HTTP transport standing in for providers and gateways:
 | Post subscriptions | admin config, every server-side limit (username, posts, old posts, min/max, delay, expiry), tampered POSTs, reserve charge, exact API v2 payload, idempotency, status sync + settlement with/without provider charge, expired, provider rejection, cancel (queued, accepted, unsupported, forced), manual expiry by cron with **4 concurrent processes → one refund** |
 | Price protection | safe price with margin + largest discount, unchanged/decrease/increase/large increase, protect/auto/disable/off, manual prices, auto-sync markup, existing orders untouched, order-time guard for discounted users, unavailable/failed sync, admin settings and page |
 | Gateway bonus | exact calculation, OxaPay/Cryptomus/P2Gateway/manual independently, terms snapshot, duplicate callbacks, unpaid/underpaid/rejected, tampered POST, admin validation |
+| Cron URL | URL created/rotated in the admin with full wget/curl commands, key encrypted, `.env` key precedence, a real due subscription delivered by the URL call, nothing due on repeat, no-cache headers, wrong/old key 404 + admin warning, CSRF on rotation |
+| Platforms | seeded list with icons/toggles, OFF hides cards/categories/services (stored and auto-detected) from order page, catalog, public list and API and refuses orders, data untouched, existing subscriptions continue, ON restores, disabled platform not assignable, rename/card toggle |
+| Session expiry | immediate save, stale token → 303 back to the same tab with input restored (secrets never), expired login → sign-in → restored page, cross-site 403 without restore, JSON 419, user forms |
+| Promo per gateway | one gateway, several gateways, legacy "all" codes, rejection on other gateways (validate + payment creation), manual hides the field and refuses codes (service + HTTP), gateway switching, replayed callbacks credit once, admin selection/validation |
+| Blog SEO | automatic title/description/slug/canonical, OG/Twitter/BlogPosting, manual overrides, invalid canonical refused, noindex/nofollow + X-Robots-Tag, drafts/scheduled excluded, sitemap/robots, slug change 301, one URL per post, pagination/tag robots, legacy posts |
 | reCAPTCHA | OFF (no widget/call), ON widget + CSP, login/sign-up refused on missing/invalid/replayed token, v3 score/action, Google unreachable (fail closed), CSRF first, Google OAuth unaffected, encrypted masked secret |
 | Google & remember me | state/nonce/PKCE, forged or replayed state, aud/iss/exp/nonce/email_verified checks, new user completion with mobile/terms, verified-email linking vs pre-hijacking refusal, 2FA/suspension, connect/disconnect, encrypted secret; remember-me cookie hashing, restore, rotation, theft/version/logout invalidation |
 | Deposits & content | per-gateway min/max (service, HTTP, admin), one-time migration of the global limits, blog admin (validation, scheduling, publish toggle, public visibility, permissions), API Access page (key shown once, no cross-user leak), admin balance controls |

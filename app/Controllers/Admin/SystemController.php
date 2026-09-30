@@ -121,8 +121,23 @@ final class SystemController extends Controller
             'cronCheck' => CronStatus::readCheck(),
             'problems' => CronStatus::problems($status, $tasks),
             'checks' => CronService::diagnose(),
-            'httpKey' => strlen((string) Config::get('cron_key', '')) >= 32,
+            'cronUrl' => \App\Services\CronUrl::url(),
+            'cronUrlSource' => \App\Services\CronUrl::source(),
+            'cronUrlCommands' => \App\Services\CronUrl::commands(),
         ]);
+    }
+
+    /** Create or rotate the cron URL key (stored encrypted in settings; CRON_KEY in .env takes precedence). */
+    public function cronUrl(Request $request): Response
+    {
+        if (\App\Services\CronUrl::source() === 'env') {
+            throw new ValidationException('The cron URL key comes from CRON_KEY in .env. Change it there to rotate it.');
+        }
+        $rotated = \App\Services\CronUrl::enabled();
+        \App\Services\CronUrl::generate();
+        AuditService::log($rotated ? 'cron.url_rotate' : 'cron.url_enable', 'cron', 'url', []);
+        $this->success($rotated ? 'A new cron URL was generated. The old URL no longer works: update your cron job.' : 'Cron URL enabled. Copy the command below into your hosting cron job.');
+        return Response::redirect(admin_url('cron#cron-url'));
     }
 
     public function runCron(Request $request, string $task): Response

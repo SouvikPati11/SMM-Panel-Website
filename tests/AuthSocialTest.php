@@ -245,7 +245,7 @@ T::test('Google: connect/disconnect from Security (CSRF-protected), one account 
     $a = Fx::user('0');
     login_as_user($a);
     T::true(str_contains(http('GET', '/account/security')->body(), 'Connect Google'));
-    T::throws(App\Core\Exceptions\HttpException::class, fn () => http('POST', '/account/google/connect', []), 'form token');
+    T::throws(App\Core\Exceptions\HttpException::class, fn () => http('POST', '/account/google/connect', []), 'could not be verified');
     $r = $google(['sub' => '6000006', 'email' => 'a-google@example.com'], 'link');
     T::true(str_contains((string) $r->header('Location'), '/account/security'));
     T::eq('6000006', $sdb->fetchColumn("SELECT provider_user_id FROM user_social_accounts WHERE user_id = ?", [$a['id']]));

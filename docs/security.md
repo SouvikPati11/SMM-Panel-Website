@@ -29,7 +29,11 @@ deploying. Every control listed under "Implemented" is covered by
 - Protections against locking yourself out (can't disable/delete yourself or the last super admin).
 
 ### CSRF
-- Per-session token on every form and AJAX POST (`hash_equals` comparison); invalid → HTTP 419.
+- Per-session token on every form and AJAX POST (`hash_equals` comparison). A request without a valid token is **never processed**:
+  - same-site browser form (the session or token expired while the page was open): 303 back to the page it came from, with a clear message and the typed fields restored (never passwords, secrets, keys or tokens), after signing in again if the login also expired;
+  - cross-site request (another Origin/Referer, or none): 403, nothing restored, so this can't be used to pre-fill an admin's form;
+  - AJAX/JSON: 419 with `{"code":"session_expired"}`.
+  Before this, expired forms ended on a bare 419 page (a non-standard status some hosts replace with their own error page) and lost the typed data.
 - Stateless endpoints (`/api/v2`, `/webhooks/*`, `/tasks/run/*`) have no session and authenticate by API key, signature or secret instead.
 
 ### Money

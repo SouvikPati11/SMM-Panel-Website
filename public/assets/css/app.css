@@ -207,8 +207,8 @@ legend { padding: 0 6px; font-weight: 700; font-size: 14px; }
 .table .actions { text-align: right; white-space: nowrap; }
 .table .link-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .table .nowrap { white-space: nowrap; }
-.cell-title { font-weight: 600; color: var(--text); }
-.cell-sub { font-size: 12.5px; color: var(--muted); }
+.cell-title { font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.cell-sub { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
 .mono { font-family: var(--mono); font-size: 13px; }
 tr.row-attention td { background: var(--warning-50) !important; }
 
@@ -268,6 +268,8 @@ tr.row-attention td { background: var(--warning-50) !important; }
 
 .list-plain { list-style: none; margin: 0; padding: 0; }
 .list-rows > li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+.list-rows > li > :first-child { min-width: 0; flex: 1 1 auto; } /* long names/URLs wrap instead of widening the page */
+.list-rows > li > :last-child:not(:first-child) { flex: 0 0 auto; } /* status/actions keep their size */
 .list-rows > li:last-child { border-bottom: 0; }
 
 .progress { height: 8px; background: var(--surface-3); border-radius: 8px; overflow: hidden; }
@@ -348,9 +350,12 @@ dialog.modal::backdrop { background: rgba(10, 12, 25, .55); backdrop-filter: blu
 .user-chip:hover { background: var(--surface-3); }
 .content { padding: 24px; width: 100%; max-width: 1400px; margin: 0 auto; flex: 1; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
-.page-head h1 { margin: 0; font-size: 1.5rem; }
-.page-head p { margin: 4px 0 0; color: var(--muted); }
-.breadcrumb { display: flex; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 6px; list-style: none; padding: 0; }
+.page-head > * { min-width: 0; } /* flex items default to min-width:auto: an unbreakable e-mail/URL in the title made the page wider than the phone (shifted/zoomed-out admin pages) */
+.page-head > :first-child { flex: 1 1 auto; }
+.page-head h1 { margin: 0; font-size: 1.5rem; overflow-wrap: anywhere; }
+.page-head p { margin: 4px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.breadcrumb { display: flex; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 6px; list-style: none; padding: 0; min-width: 0; }
+.breadcrumb li { min-width: 0; overflow-wrap: anywhere; }
 .breadcrumb li + li::before { content: "/"; margin-right: 6px; color: var(--border-strong); }
 .breadcrumb a { color: var(--muted); }
 .menu-toggle, .topbar .menu-toggle { display: none; }
@@ -559,7 +564,10 @@ dialog.modal::backdrop { background: rgba(10, 12, 25, .55); backdrop-filter: blu
   .hide-xs { display: none !important; }
 }
 @media (max-width: 380px) {
-  .svc-summary { grid-template-columns: 1fr 1fr; }
+  .svc-summary { gap: 5px; }
+  .svc-summary div { padding: 7px 6px; }
+  .svc-summary small { font-size: 11px; }
+  .svc-summary strong { font-size: 13.5px; overflow-wrap: anywhere; }
   .site-nav .actions .btn { padding: 0 12px; }
 }
 /* ---------------------------------------------------------------- order page: platforms, loading, confirm */
@@ -890,3 +898,33 @@ ul.hero-trust, ol.steps, .platform-grid { list-style: none; padding: 0; margin-l
 .social-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; color: var(--primary); }
 @media (prefers-reduced-motion: reduce) { .social-link { transition: none; } .social-link:hover { transform: none; } }
 .footer-bottom { align-items: center; }
+
+/* admin cron page */
+.cron-option-title { font-size: 15px; margin: 18px 0 8px; }
+.cron-url-diag { margin-top: 8px; }
+.copy-box code.break-all { white-space: normal; }
+
+/* admin platforms */
+.platform-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.platform-row-icon { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); }
+.platform-row-name { min-width: 0; flex: 1 1 auto; max-width: 260px; }
+.platform-row-name .input { min-height: 38px; }
+.platform-table tr.is-off .platform-row-icon { opacity: .45; }
+
+/* promo code gateways */
+.coupon-gateways { border: 0; padding: 0; margin: 0 0 14px; min-width: 0; }
+.coupon-gateways .check { display: flex; margin-bottom: 6px; }
+.coupon-gateway-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 2px 12px; margin: 4px 0 6px 26px; }
+
+/* blog SEO editor */
+.serp-preview { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; background: var(--surface); min-width: 0; }
+.serp-url { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.serp-title { font-size: 17px; line-height: 1.3; color: #1a0dab; margin: 2px 0 4px; overflow-wrap: anywhere; }
+:root[data-theme="dark"] .serp-title { color: #8ab4f8; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .serp-title { color: #8ab4f8; } }
+.serp-desc { font-size: 13.5px; color: var(--text-2); line-height: 1.45; overflow-wrap: anywhere; }
+.seo-checks { list-style: none; padding: 0; margin: 6px 0 8px; display: grid; gap: 6px; font-size: 13px; }
+.seo-checks li { display: flex; gap: 8px; align-items: flex-start; }
+.seo-checks li .icon { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.seo-checks li.ok .icon { color: var(--success); }
+.seo-checks li.todo .icon { color: var(--warning); }

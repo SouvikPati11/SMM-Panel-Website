@@ -23,12 +23,12 @@ final class OrderController extends Controller
         $db = Database::instance();
         $categories = $db->fetchAll(
             "SELECT DISTINCT c.id, c.name, c.platform, c.sort_order FROM categories c JOIN services s ON s.category_id = c.id
-             WHERE c.status = 'active' AND s.status = 'active' AND s.is_hidden = 0 ORDER BY c.sort_order, c.name"
+             WHERE c.status = 'active' AND s.status = 'active' AND s.is_hidden = 0" . Platforms::sqlVisible('c.id') . " ORDER BY c.sort_order, c.name"
         );
         $rows = $db->fetchAll(
             "SELECT s.id, s.category_id, s.name, s.rate, s.type, s.link_label, s.min_quantity, s.max_quantity, s.dripfeed, s.subscription_enabled, s.subscription_intervals, s.subscription_min_cycles, s.subscription_max_cycles, s.subscription_mode, s.subscription_delays, s.subscription_old_posts_max, s.subscription_max_expiry_days, s.refill, s.cancel, s.average_time, s.custom_fields
              FROM services s JOIN categories c ON c.id = s.category_id
-             WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active' ORDER BY c.sort_order, s.sort_order, s.id"
+             WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active'" . Platforms::sqlVisible('c.id') . " ORDER BY c.sort_order, s.sort_order, s.id"
         );
         $services = [];
         foreach ($rows as $s) {
@@ -125,7 +125,7 @@ final class OrderController extends Controller
             'runs' => $params['runs'],
             'interval' => $params['interval'],
             'extra' => $params['extra'],
-            'rate' => rate($rate) . ($package ? ' per package' : ' per 1000'),
+            'rate' => rate($rate) . ($package ? ' per package' : ' per 1,000'),
             'charge' => money($charge),
             'charge_base' => money_base($charge),
             'balance' => money($user['balance']),
@@ -133,10 +133,10 @@ final class OrderController extends Controller
             'notes' => [],
         ];
         if ($params['runs']) {
-            $out['notes'][] = "Drip-feed: {$params['runs']} runs every {$params['interval']} min (total " . number_format($params['quantity'] * $params['runs']) . ').';
+            $out['notes'][] = "Delivered gradually: {$params['runs']} rounds, every {$params['interval']} minutes (" . number_format($params['quantity'] * $params['runs']) . ' in total).';
         }
         if (!$isSub && SubscriptionService::options($service)['only']) {
-            throw new ValidationException('"' . $service['name'] . '" is a subscription service: choose how often it repeats.');
+            throw new ValidationException('"' . $service['name'] . '" can only be ordered as a subscription: choose "Repeat automatically" and how often it repeats.');
         }
         if ($isSub) {
             $hours = $request->int('sub_interval');
@@ -148,7 +148,7 @@ final class OrderController extends Controller
                 'per_delivery' => money($charge),
                 'estimated_total' => money(Money::mul($charge, (string) $cycles)),
             ];
-            $out['notes'][] = 'The first delivery is charged now; each later delivery is charged from your balance when it is placed, at the price at that time.';
+            $out['notes'][] = 'You pay for the first delivery now. Each later one is paid from your balance when it is placed, at the price at that time.';
         }
         return $this->json($out);
     }
@@ -186,14 +186,14 @@ final class OrderController extends Controller
                 'per_post' => money(Money::divInt(Money::mul($rate, (string) $p['min']), 1000)) . ' – ' . money($perPostMax),
                 'reserve' => money($reserve),
             ],
-            'rate' => rate($rate) . ' per 1000',
+            'rate' => rate($rate) . ' per 1,000',
             'charge' => money($reserve),
             'charge_base' => money_base($reserve),
             'balance' => money($user['balance']),
             'insufficient' => Money::cmp((string) $user['balance'], $reserve) < 0,
             'notes' => [
-                'The maximum possible cost (' . money($reserve) . ') is reserved from your balance now.',
-                'When the subscription finishes, expires or is cancelled, the unused part is returned to your balance automatically.',
+                'The most it can cost (' . money($reserve) . ') is held from your balance now.',
+                'You only pay for what is delivered: when the subscription ends or is cancelled, the rest comes back to your balance automatically.',
             ],
         ];
     }
@@ -204,7 +204,7 @@ final class OrderController extends Controller
         $formKey = $request->str('form_key') ?: null;
         if ($request->str('order_type') === 'subscription' && SubscriptionService::options(OrderService::orderableService($request->int('service')))['mode'] === 'posts') {
             $sub = SubscriptionService::createPosts((int) $user['id'], $request->int('service'), $this->postsInput($request), $formKey ? 'web:' . $formKey : null);
-            $msg = !empty($sub['duplicate']) ? 'This subscription was already created (#' . $sub['id'] . ').' : 'Subscription #' . $sub['id'] . ' created — ' . money($sub['prepaid']) . ' reserved; the unused part is refunded when it ends.';
+            $msg = !empty($sub['duplicate']) ? 'This subscription was already created (#' . $sub['id'] . ').' : 'Subscription #' . $sub['id'] . ' started. ' . money($sub['prepaid']) . ' is reserved from your balance; anything unused comes back automatically when it ends.';
             if ($request->wantsJson()) {
                 return $this->json(['ok' => true, 'type' => 'subscription', 'subscription_id' => (int) $sub['id'], 'order_id' => (int) $sub['last_order_id'], 'message' => $msg, 'url' => url('/subscriptions/' . $sub['id']), 'form_key' => bin2hex(random_bytes(16))]);
             }
@@ -213,7 +213,7 @@ final class OrderController extends Controller
         }
         if ($request->str('order_type') === 'subscription') {
             $sub = SubscriptionService::create((int) $user['id'], $request->int('service'), $this->orderInput($request), $request->int('sub_interval'), $request->int('sub_cycles'), $formKey ? 'web:' . $formKey : null);
-            $msg = !empty($sub['duplicate']) ? 'This subscription was already created (#' . $sub['id'] . ').' : 'Subscription #' . $sub['id'] . ' created — first delivery ordered (order #' . $sub['last_order_id'] . ').';
+            $msg = !empty($sub['duplicate']) ? 'This subscription was already created (#' . $sub['id'] . ').' : 'Subscription #' . $sub['id'] . ' started. The first delivery is on its way (order #' . $sub['last_order_id'] . ').';
             if ($request->wantsJson()) {
                 return $this->json(['ok' => true, 'type' => 'subscription', 'subscription_id' => (int) $sub['id'], 'order_id' => (int) $sub['last_order_id'], 'message' => $msg, 'url' => url('/subscriptions/' . $sub['id']), 'form_key' => bin2hex(random_bytes(16))]);
             }

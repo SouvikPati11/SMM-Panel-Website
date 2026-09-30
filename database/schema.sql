@@ -281,6 +281,16 @@ CREATE TABLE IF NOT EXISTS provider_services (
   CONSTRAINT fk_ps_provider FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS platforms (
+  `key`       VARCHAR(20) NOT NULL,
+  name        VARCHAR(60) NOT NULL,
+  status      ENUM('active','disabled') NOT NULL DEFAULT 'active',
+  shortcut    TINYINT(1) NOT NULL DEFAULT 0,
+  sort_order  INT NOT NULL DEFAULT 0,
+  updated_at  DATETIME NOT NULL,
+  PRIMARY KEY (`key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS categories (
   id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
   name        VARCHAR(150) NOT NULL,
@@ -460,10 +470,20 @@ CREATE TABLE IF NOT EXISTS coupons (
   starts_at        DATETIME NULL,
   expires_at       DATETIME NULL,
   status           ENUM('active','disabled') NOT NULL DEFAULT 'active',
+  all_gateways     TINYINT(1) NOT NULL DEFAULT 1,
   created_at       DATETIME NOT NULL,
   updated_at       DATETIME NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_coupon_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS coupon_payment_methods (
+  coupon_id          INT UNSIGNED NOT NULL,
+  payment_method_id  INT UNSIGNED NOT NULL,
+  PRIMARY KEY (coupon_id, payment_method_id),
+  KEY idx_cpm_method (payment_method_id),
+  CONSTRAINT fk_cpm_coupon FOREIGN KEY (coupon_id) REFERENCES coupons(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cpm_method FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS payments (
@@ -707,6 +727,11 @@ CREATE TABLE IF NOT EXISTS blog_posts (
   featured_image   VARCHAR(255) NULL,
   seo_title        VARCHAR(200) NULL,
   seo_description  VARCHAR(320) NULL,
+  seo_keyword      VARCHAR(100) NULL,
+  canonical_url    VARCHAR(500) NULL,
+  og_image         VARCHAR(255) NULL,
+  robots_index     TINYINT(1) NOT NULL DEFAULT 1,
+  robots_follow    TINYINT(1) NOT NULL DEFAULT 1,
   status           ENUM('published','draft') NOT NULL DEFAULT 'draft',
   published_at     DATETIME NULL,
   views            INT UNSIGNED NOT NULL DEFAULT 0,
@@ -717,6 +742,15 @@ CREATE TABLE IF NOT EXISTS blog_posts (
   KEY idx_bp_status (status, published_at),
   CONSTRAINT fk_bp_cat FOREIGN KEY (category_id) REFERENCES blog_categories(id) ON DELETE SET NULL,
   CONSTRAINT fk_bp_admin FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS blog_slug_redirects (
+  old_slug    VARCHAR(240) NOT NULL,
+  post_id     INT UNSIGNED NOT NULL,
+  created_at  DATETIME NOT NULL,
+  PRIMARY KEY (old_slug),
+  KEY idx_bsr_post (post_id),
+  CONSTRAINT fk_bsr_post FOREIGN KEY (post_id) REFERENCES blog_posts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS blog_tags (

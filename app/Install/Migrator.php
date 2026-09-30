@@ -213,8 +213,60 @@ final class Migrator
                     $db->query('INSERT IGNORE INTO settings (`key`, `value`, is_secret, updated_at) VALUES (?, ?, 0, ?)', [$k, $v, now()]);
                 }
             },
+            '2026_10_27_platforms_coupon_gateways_blog_seo' => static function (Database $db): void {
+                $add = static function (string $table, array $cols) use ($db): void {
+                    foreach ($cols as $col => $ddl) {
+                        if (!self::columnExists($db, $table, $col)) {
+                            $db->pdo()->exec("ALTER TABLE {$table} ADD COLUMN {$ddl}");
+                        }
+                    }
+                };
+                // --- Platform management (Admin → Platforms): every known platform ON, default shortcuts
+                $db->pdo()->exec(self::PLATFORMS_DDL);
+                Seeder::seedPlatforms($db);
+                // --- Promo codes per payment gateway. Existing codes keep working on every online gateway.
+                $add('coupons', ['all_gateways' => 'all_gateways TINYINT(1) NOT NULL DEFAULT 1 AFTER status']);
+                $db->pdo()->exec(self::COUPON_GATEWAYS_DDL);
+                // --- Blog SEO: focus keyword, canonical, OG image, robots; old slugs keep redirecting
+                $add('blog_posts', [
+                    'seo_keyword' => 'seo_keyword VARCHAR(100) NULL AFTER seo_description',
+                    'canonical_url' => 'canonical_url VARCHAR(500) NULL AFTER seo_keyword',
+                    'og_image' => 'og_image VARCHAR(255) NULL AFTER canonical_url',
+                    'robots_index' => 'robots_index TINYINT(1) NOT NULL DEFAULT 1 AFTER og_image',
+                    'robots_follow' => 'robots_follow TINYINT(1) NOT NULL DEFAULT 1 AFTER robots_index',
+                ]);
+                $db->pdo()->exec(self::BLOG_REDIRECTS_DDL);
+            },
         ];
     }
+
+    public const PLATFORMS_DDL = "CREATE TABLE IF NOT EXISTS platforms (
+  `key`       VARCHAR(20) NOT NULL,
+  name        VARCHAR(60) NOT NULL,
+  status      ENUM('active','disabled') NOT NULL DEFAULT 'active',
+  shortcut    TINYINT(1) NOT NULL DEFAULT 0,
+  sort_order  INT NOT NULL DEFAULT 0,
+  updated_at  DATETIME NOT NULL,
+  PRIMARY KEY (`key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    public const COUPON_GATEWAYS_DDL = "CREATE TABLE IF NOT EXISTS coupon_payment_methods (
+  coupon_id          INT UNSIGNED NOT NULL,
+  payment_method_id  INT UNSIGNED NOT NULL,
+  PRIMARY KEY (coupon_id, payment_method_id),
+  KEY idx_cpm_method (payment_method_id),
+  CONSTRAINT fk_cpm_coupon FOREIGN KEY (coupon_id) REFERENCES coupons(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cpm_method FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    public const BLOG_REDIRECTS_DDL = "CREATE TABLE IF NOT EXISTS blog_slug_redirects (
+  old_slug    VARCHAR(240) NOT NULL,
+  post_id     INT UNSIGNED NOT NULL,
+  created_at  DATETIME NOT NULL,
+  PRIMARY KEY (old_slug),
+  KEY idx_bsr_post (post_id),
+  CONSTRAINT fk_bsr_post FOREIGN KEY (post_id) REFERENCES blog_posts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
     public const PRICE_EVENTS_DDL = "CREATE TABLE IF NOT EXISTS service_price_events (
   id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

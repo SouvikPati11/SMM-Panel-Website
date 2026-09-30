@@ -55,8 +55,12 @@ final class FundsController extends Controller
         if (!Money::isNumeric($amount) || !Money::isPositive($amount)) {
             return $this->json(['ok' => false, 'error' => 'Enter the amount first.']);
         }
+        $method = Database::instance()->fetch("SELECT * FROM payment_methods WHERE id = ? AND status = 'active'", [$request->int('method_id')]);
+        if (!$method) {
+            return $this->json(['ok' => false, 'error' => 'Choose a payment method first.']);
+        }
         try {
-            $r = CouponService::validate($request->str('code'), (int) $user['id'], Money::of($amount, 2));
+            $r = CouponService::validate($request->str('code'), (int) $user['id'], Money::of($amount, 2), $method);
             return $this->json(['ok' => true, 'message' => 'Code applied: you will receive a ' . money($r['bonus']) . ' bonus after payment.']);
         } catch (ValidationException $e) {
             return $this->json(['ok' => false, 'error' => $e->getMessage()]);

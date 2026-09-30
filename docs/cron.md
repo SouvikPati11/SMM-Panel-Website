@@ -121,15 +121,46 @@ rather than discarding output.
 
 Do not combine both styles.
 
-## URL-only cron (last resort)
+## Cron URL (Option B)
 
-If your host can only fetch URLs, set `CRON_KEY` in `.env` (32+ random
-characters; the installer generates one) and schedule:
+Use this when your host can only call a URL, or the PHP command does not work.
+**Admin → Cron → Option B** shows the exact, working URL and ready-to-paste
+commands. If there is no URL yet, press **Create cron URL**: a random key is
+generated and stored encrypted. `CRON_KEY` in `.env` (32+ characters), when
+set, takes precedence. **Generate a new URL** rotates the key, and the old
+URL stops working immediately.
+
+Hostinger's *Custom* cron job runs a **shell command**, so a bare URL pasted
+there never runs anything. Paste the `wget` command from the admin page:
 
 ```
-* * * * * curl -fsS https://example.com/tasks/run/YOUR_CRON_KEY
+* * * * * wget -q -O - --timeout=600 'https://example.com/tasks/run/YOUR_KEY'
+# or
+* * * * * curl -fsS -L --max-time 600 'https://example.com/tasks/run/YOUR_KEY'
 ```
 
-Wrong keys return 404, and the endpoint is rate limited. It returns HTTP 500
-when a task failed and records into the same diagnostics. CLI cron is preferred
-(no web time limits).
+Both follow redirects (http→https, www), so a site that forces HTTPS still
+runs its tasks. (Plain `curl` without `-L` silently stops at the redirect.)
+
+What the URL does:
+
+- It runs every **due** task, exactly like `php cron/run.php`, with the same
+  per-task locks, so it can safely run alongside the CLI job.
+- It answers with a one-line JSON summary, for example
+  `{"ok":true,"ran":{"subscriptions":"success"},"message":"Ran 1 due task(s)."}`.
+  When nothing is due it answers "No task was due". It returns HTTP 500 if a
+  task failed.
+- Responses are marked `no-store` and `X-LiteSpeed-Cache-Control: no-cache`, so
+  LiteSpeed/CDN caches never answer in place of running the tasks.
+- It keeps running if the caller disconnects (`ignore_user_abort`) and allows up
+  to 10 minutes.
+- A wrong or old key answers 404 and does nothing. The admin Cron page then
+  warns "A cron URL with a wrong or old key was called…", so an outdated job is
+  easy to spot.
+- It is rate limited (3 calls per 50 seconds).
+- Admin → Cron shows *Called by* (Cron URL or PHP command), *Last URL call*
+  (time, HTTP status, IP) and the last rejected call.
+
+The older path `/cron/run/KEY` mentioned in earlier code comments never
+worked on Hostinger, because the root `.htaccess` blocks everything under
+`/cron/` (403). Use `/tasks/run/KEY`.

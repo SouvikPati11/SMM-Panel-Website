@@ -10,20 +10,28 @@ use App\Core\Money;
 
 /**
  * Deposit promo codes: a coupon adds a bonus (percent or fixed, optionally capped)
- * to a qualifying deposit. Limits are re-checked under a row lock when the
+ * to a qualifying deposit made through an allowed online gateway (all online
+ * gateways, or the ones selected in Admin → Promo codes; never manual payments). Limits are re-checked under a row lock when the
  * payment completes, so concurrent use cannot exceed usage limits.
  */
 final class CouponService
 {
-    /** Validate for a prospective deposit. @return array{coupon:array, bonus:string} */
-    public static function validate(string $code, int $userId, string $amount): array
+    /**
+     * Validate for a prospective deposit with the chosen payment method.
+     * Manual payments never take promo codes; a code limited to certain
+     * gateways is refused on any other. @return array{coupon:array, bonus:string}
+     */
+    public static function validate(string $code, int $userId, string $amount, ?array $method = null): array
     {
+        if ($method !== null && ($method['gateway'] ?? '') === 'manual') {
+            throw new ValidationException('Promo codes cannot be used with manual payments. Choose an online payment method to use a code.');
+        }
         $code = strtoupper(trim($code));
         if ($code === '' || !preg_match('/^[A-Z0-9_-]{2,40}$/', $code)) {
             throw new ValidationException('Invalid promo code.');
         }
         $coupon = Database::instance()->fetch('SELECT * FROM coupons WHERE code = ?', [$code]);
-        $error = $coupon ? self::check($coupon, $userId, $amount) : 'Invalid promo code.';
+        $error = $coupon ? (self::check($coupon, $userId, $amount) ?? ($method !== null ? self::gatewayError($coupon, $method) : null)) : 'Invalid promo code.';
         if ($error) {
             throw new ValidationException($error);
         }
@@ -53,6 +61,29 @@ final class CouponService
             return 'This promo code requires a minimum deposit of ' . money($coupon['min_deposit']) . '.';
         }
         return null;
+    }
+
+    /** IDs of the payment methods a code is limited to ([] = every online gateway). */
+    public static function methodIds(int $couponId): array
+    {
+        return array_map('intval', array_column(Database::instance()->fetchAll('SELECT payment_method_id FROM coupon_payment_methods WHERE coupon_id = ?', [$couponId]), 'payment_method_id'));
+    }
+
+    public static function allowsMethod(array $coupon, array $method): bool
+    {
+        if (($method['gateway'] ?? '') === 'manual') {
+            return false;
+        }
+        return (int) ($coupon['all_gateways'] ?? 1) === 1 || in_array((int) $method['id'], self::methodIds((int) $coupon['id']), true);
+    }
+
+    private static function gatewayError(array $coupon, array $method): ?string
+    {
+        if (self::allowsMethod($coupon, $method)) {
+            return null;
+        }
+        $names = Database::instance()->fetchAll("SELECT pm.name FROM coupon_payment_methods c JOIN payment_methods pm ON pm.id = c.payment_method_id WHERE c.coupon_id = ? AND pm.status = 'active' AND pm.gateway <> 'manual' ORDER BY pm.sort_order, pm.id", [$coupon['id']]);
+        return 'This promo code cannot be used with ' . $method['name'] . '.' . ($names ? ' It works with: ' . implode(', ', array_column($names, 'name')) . '.' : '');
     }
 
     public static function bonus(array $coupon, string $amount): string

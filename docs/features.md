@@ -281,6 +281,74 @@ Admin → Blog:
   keeps the old image until the new one is saved, and explains the SEO fields.
 - Only live posts appear on `/blog`, in category counts and in the sitemap.
 
+### Blog SEO (per post, Admin → Blog → SEO)
+
+Every value has an automatic default, and a manual field overrides it:
+
+| | Automatic | Manual override |
+|---|---|---|
+| Title | post title + " — Site" (site name dropped when longer than 60 characters) | *SEO title*, used exactly as typed |
+| Meta description | excerpt, else the start of the post, about 155 characters, cut at a word | *Meta description* |
+| Slug | clean slug from the title; a stable fallback for non-Latin titles | *Slug*. Editing it later 301-redirects the old address |
+| Canonical | `https://site/blog/{slug}`, built from the stored slug (query strings never create another canonical) | *Canonical URL* (absolute http/https only) |
+| Share image | featured image, else the site default | *Share image (Open Graph)* |
+| Robots | `index,follow` | *Index* / *Follow* toggles (also sent as `X-Robots-Tag`) |
+| Focus keyword | — | used for editor checks and the article `keywords` |
+
+Every post page outputs:
+
+- the canonical link and robots meta;
+- Open Graph tags: `og:type=article`, `og:image` + alt, `article:published_time`, `modified_time`, `section`, `tag`;
+- Twitter Card tags (`summary_large_image` with an image);
+- **BlogPosting** JSON-LD: headline, description, url, mainEntityOfPage, dates, image, author, publisher with logo, articleSection, keywords, wordCount;
+- a BreadcrumbList.
+
+The editor shows a search-result preview and simple checks: title and
+description length, and whether the keyword appears in the title, description,
+slug, first paragraph and a subheading. These are guidance only; nothing
+guarantees a ranking.
+
+What is excluded:
+
+- Drafts and scheduled posts return 404 and are never in the sitemap.
+- The sitemap also leaves out noindex posts and posts whose canonical points
+  elsewhere, and lists blog categories.
+- `/blog?page=2+` is self-canonical and `noindex,follow`. Tag archives are
+  `noindex,follow`. `robots.txt` links the sitemap and never blocks `/blog`.
+
+## Platforms (Admin → Platforms)
+
+The platform list lives in one place: the definitions (icon, name detection)
+are in `App\Helpers\Platforms`, and the admin-managed state is in the
+`platforms` table.
+
+- Each platform can be turned **ON/OFF**, renamed, and given or denied its own
+  New Order card. Without a card, it appears under *Other*.
+- **OFF** hides the platform's categories and services from customers
+  everywhere: the New Order shortcuts and pickers, the service lists, the API
+  `services` list and the homepage. New orders for them are refused on the
+  server (web, mass order, API).
+- Nothing is deleted or changed: categories keep their platform, services and
+  orders are untouched, and **existing subscriptions keep being delivered**.
+  Turning the platform ON again restores everything.
+- A platform that is OFF can't be newly assigned to a category. A category that
+  already has it keeps it and is marked "Platform off".
+
+## Promo codes per payment gateway
+
+Admin → Promo codes → *Applicable payment gateways*: **All online gateways**
+(the default, and what every existing code keeps), or **Only these gateways**
+with one or more gateways ticked.
+
+- The code check and payment creation refuse a code on any other gateway
+  ("This promo code cannot be used with X. It works with: …").
+- **Manual payments never take promo codes.** The field is not rendered for
+  them, and the server refuses a code sent anyway.
+- Switching gateway on Add funds re-checks an entered code at once.
+- The bonus is credited once, however many callbacks arrive.
+- Manual requests already submitted with a code before the upgrade keep it
+  when approved.
+
 ## API Access page (user panel)
 
 Shows:

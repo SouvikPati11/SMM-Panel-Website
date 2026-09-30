@@ -33,6 +33,7 @@ final class SettingsService
         'social_x' => '',
         'social_youtube' => '',
         'social_telegram' => '',
+        'social_tiktok' => '',
         'footer_text' => '',
         // Currency
         'currency_code' => 'USD',
@@ -51,6 +52,12 @@ final class SettingsService
         'google_login_enabled' => '0',
         'google_client_id' => '',
         'google_client_secret' => '',
+        // Google reCAPTCHA on login + registration (RECAPTCHA_SITE_KEY / RECAPTCHA_SECRET_KEY in .env take precedence)
+        'recaptcha_enabled' => '0',
+        'recaptcha_version' => 'v2', // v2 = "I'm not a robot" checkbox, v3 = invisible score
+        'recaptcha_site_key' => '',
+        'recaptcha_secret_key' => '',
+        'recaptcha_min_score' => '0.5',
         'login_max_attempts' => '5',
         'login_lockout_minutes' => '15',
         'default_price_level' => '',
@@ -63,6 +70,9 @@ final class SettingsService
         'order_sync_batch' => '100',
         'subscriptions_enabled' => '1',
         'subscription_max_cycles' => '100',
+        // Provider price protection: off | protect | auto | disable (see ProviderSyncService::applyCostChanges)
+        'price_protection_mode' => 'protect',
+        'price_protection_margin' => '0',
         // Funds
         // Legacy global limits: converted into each gateway's min/max by migration 2026_10_12 and no longer enforced.
         'min_deposit' => '1',
@@ -105,7 +115,7 @@ final class SettingsService
         'admin_notify_email' => '',
     ];
 
-    public const SECRET_KEYS = ['mail_password', 'google_client_secret'];
+    public const SECRET_KEYS = ['mail_password', 'google_client_secret', 'recaptcha_secret_key'];
 
     public static function boot(): void
     {

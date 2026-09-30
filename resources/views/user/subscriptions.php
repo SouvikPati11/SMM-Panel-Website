@@ -15,16 +15,16 @@ $total = array_sum($counts); ?>
     <div class="empty"><?= icon('refresh') ?><h3>No subscriptions yet</h3><p>On the New order page, pick a service marked "Subscription" and choose <strong>Auto-subscription</strong>.</p></div>
   <?php else: ?>
   <div class="table-wrap"><table class="table table-cards">
-    <thead><tr><th>ID</th><th>Service</th><th>Link</th><th class="num">Qty / delivery</th><th>Progress</th><th>Next delivery</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>Service</th><th>Link / username</th><th class="num">Quantity</th><th>Progress</th><th>Next delivery / expiry</th><th>Status</th><th></th></tr></thead>
     <tbody>
-    <?php foreach ($subs->items as $s): ?>
+    <?php foreach ($subs->items as $s): $sm = \App\Services\SubscriptionService::summary($s); ?>
       <tr>
         <td data-label="ID"><a class="mono" href="<?= e(url('/subscriptions/' . $s['id'])) ?>">#<?= (int) $s['id'] ?></a></td>
-        <td class="cell-main"><span class="cell-title"><?= e(str_limit($s['service'], 70)) ?></span><div class="cell-sub"><?= e(\App\Services\SubscriptionService::INTERVALS[(int) $s['interval_hours']] ?? ((int) $s['interval_hours'] . ' h')) ?></div></td>
-        <td data-label="Link" class="link-cell"><?= link_html($s['link']) ?></td>
-        <td data-label="Qty / delivery" class="num"><?= number_format((int) $s['quantity']) ?></td>
-        <td data-label="Progress"><div class="progress-line"><span class="progress" aria-hidden="true"><span style="width:<?= (int) round(100 * (int) $s['completed_cycles'] / max(1, (int) $s['total_cycles'])) ?>%"></span></span><span class="text-sm nowrap"><?= (int) $s['completed_cycles'] ?> / <?= (int) $s['total_cycles'] ?></span></div></td>
-        <td data-label="Next delivery" class="text-sm nowrap"><?= $s['status'] === 'active' && $s['next_run_at'] ? e(fmt_date($s['next_run_at'])) : '—' ?></td>
+        <td class="cell-main"><span class="cell-title"><?= e(str_limit($s['service'], 70)) ?></span><div class="cell-sub"><?= e($sm['schedule']) ?></div></td>
+        <td data-label="<?= e($sm['target_label']) ?>" class="link-cell"><?= $sm['posts'] ? '<span class="mono break-words">' . e($s['link']) . '</span>' : link_html($s['link']) ?></td>
+        <td data-label="Quantity" class="num nowrap"><?= e($sm['qty']) ?></td>
+        <td data-label="Progress"><div class="progress-line"><span class="progress" aria-hidden="true"><span style="width:<?= (int) round(100 * $sm['done'] / max(1, $sm['total'])) ?>%"></span></span><span class="text-sm nowrap"><?= $sm['done'] ?> / <?= $sm['total'] ?></span></div></td>
+        <td data-label="<?= $sm['posts'] ? 'Expiry' : 'Next delivery' ?>" class="text-sm nowrap"><?= $sm['posts'] ? e($sm['expiry']) : ($s['status'] === 'active' && $s['next_run_at'] ? e(fmt_date($s['next_run_at'])) : '—') ?></td>
         <td data-label="Status"><?= status_badge($s['status']) ?></td>
         <td class="actions"><a class="btn btn-ghost btn-sm" href="<?= e(url('/subscriptions/' . $s['id'])) ?>">Details</a></td>
       </tr>

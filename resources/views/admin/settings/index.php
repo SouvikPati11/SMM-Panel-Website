@@ -56,6 +56,17 @@ $s = fn (string $k) => (string) setting($k); $on = fn (string $k) => setting($k)
   <?= Form::toggle('subscriptions_enabled', 'Auto-subscriptions enabled', $on('subscriptions_enabled'), 'Enable per service with "Allow auto-subscriptions". When off, no new subscriptions are created and cron stops placing deliveries.') ?>
   <?= Form::input('subscription_max_cycles', 'Maximum deliveries per subscription', $s('subscription_max_cycles'), ['type' => 'number', 'min' => 2, 'max' => 1000])  ?>
   <?= Form::input('order_sync_batch', 'Orders synced per cron run', $s('order_sync_batch'), ['type' => 'number', 'hint' => 'Lower this on slow shared hosting.']) ?>
+  <h3 class="mt-3" id="price-protection">Provider price protection</h3>
+  <p class="hint mt-0">When a provider raises its cost (detected at every provider sync, and checked again whenever an order is placed), the panel must not keep selling below that cost. <strong>Safe price</strong> = provider cost × (1 + required margin) ÷ (1 − the largest price-level or custom discount), so even the most discounted customer pays at least cost + margin. Orders already placed keep their price. Every change is listed on <a href="<?= e(admin_url('services/price-changes')) ?>">Services → Price changes</a>.</p>
+  <div class="form-grid">
+    <?= Form::select('price_protection_mode', 'When a service is no longer safe', \App\Services\PriceProtection::MODES, \App\Services\PriceProtection::mode()) ?>
+    <?= Form::input('price_protection_margin', 'Required margin over provider cost (%)', $s('price_protection_margin'), ['type' => 'number', 'step' => '0.01', 'min' => 0, 'max' => 1000, 'hint' => '0 = never below cost. 10 = at least 10% above cost.']) ?>
+  </div>
+  <ul class="hint mt-0" style="padding-left:18px">
+    <li><strong>Protection only</strong> keeps your prices as they are; unsafe services cannot be ordered until you raise the price (or the cost drops).</li>
+    <li><strong>Auto-adjust</strong> raises the price to the safe minimum; prices you set higher are kept and prices are never lowered automatically (only auto-sync services follow the provider down).</li>
+    <li><strong>Disable service</strong> switches unsafe services off and back on when they are safe again.</li>
+  </ul>
 <?php elseif ($tab === 'funds'): ?>
   <div class="alert alert-info"><?= icon('info') ?><div>Minimum and maximum deposits are set <strong>per payment gateway</strong>: <a href="<?= e(admin_url('gateways')) ?>">Payment gateways</a> → edit → <em>Minimum deposit</em>. The deposit page and the server both use the selected gateway's limits.</div></div>
   <?= Form::input('payment_expiry_minutes', 'Invoice expiry (minutes)', $s('payment_expiry_minutes'), ['type' => 'number']) ?>

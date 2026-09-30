@@ -24,8 +24,8 @@ final class ProviderOrderStatus
         return match ($s) {
             'pending', 'awaiting', 'queued', 'new' => 'pending',
             'processing' => 'processing',
-            'inprogress', 'active', 'running' => 'in_progress',
-            'completed', 'complete', 'success', 'done', 'finished' => 'completed',
+            'inprogress', 'active', 'running', 'paused' => 'in_progress',
+            'completed', 'complete', 'success', 'done', 'finished', 'expired' => 'completed',
             'partial', 'partiallycompleted', 'partialcompleted' => 'partial',
             'canceled', 'cancelled', 'cancel', 'refunded', 'fail', 'failed', 'error' => 'cancelled',
             default => null,

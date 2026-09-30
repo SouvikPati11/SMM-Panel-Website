@@ -80,6 +80,25 @@ final class Money
         return self::fromScaled(($neg && $q !== '0' ? '-' : '') . $q, $s, $scale);
     }
 
+    /** Divide by a positive decimal divisor, rounded half-up to $scale. */
+    public static function div(string $a, string $b, int $scale = self::SCALE): string
+    {
+        if (!self::isPositive($b)) {
+            throw new \InvalidArgumentException('Divisor must be positive');
+        }
+        if (function_exists('bcdiv')) {
+            return self::round(bcdiv($a, $b, $scale + 4), $scale);
+        }
+        // a / b = (a · 10^d) / (b · 10^d) with b · 10^d an integer.
+        $b = rtrim(rtrim(self::of($b, 12), '0'), '.');
+        $d = str_contains($b, '.') ? strlen($b) - strpos($b, '.') - 1 : 0;
+        $bInt = ltrim(str_replace('.', '', $b), '0');
+        if ($bInt === '' || strlen($bInt) > 17) {
+            throw new \InvalidArgumentException('Divisor out of range');
+        }
+        return self::divInt(self::mul($a, '1' . str_repeat('0', $d), $scale + 4), (int) $bInt, $scale);
+    }
+
     /** Percentage of an amount: $amount * $percent / 100 */
     public static function percent(string $amount, string $percent, int $scale = self::SCALE): string
     {

@@ -156,7 +156,9 @@ final class ProviderController extends Controller
     public function fetch(Request $request, int $id): Response
     {
         $r = ProviderSyncService::fetchCatalog($id);
-        $this->success("Fetched {$r['count']} services from the provider." . ($r['provider_subscriptions'] ? " {$r['provider_subscriptions']} of them are provider-side subscriptions and cannot be imported." : ''));
+        $sync = ProviderSyncService::syncServicePrices($id); // costs + price protection for linked services
+        $prot = $sync['protection'] ? ' Price protection: ' . implode(', ', array_map(static fn ($k, $n) => "{$n} {$k}", array_keys($sync['protection']), $sync['protection'])) . ' (see Services → Price changes).' : '';
+        $this->success("Fetched {$r['count']} services from the provider." . ($r['provider_subscriptions'] ? " {$r['provider_subscriptions']} of them are provider-side subscriptions (imported as post-based Subscriptions services)." : '') . $prot);
         return Response::redirect(admin_url('providers/' . $id . '/services'));
     }
 
@@ -204,14 +206,15 @@ final class ProviderController extends Controller
             throw new ValidationException('Select services to import.');
         }
         $n = ProviderSyncService::importServices($id, $ids, $request->int('category_id') ?: null, $request->str('markup') ?: '0', $request->bool('auto_sync'), $request->str('category_mode') === 'provider', $skipped);
-        $this->success("{$n} services imported/updated." . ($skipped ? " {$skipped} provider-side \"Subscriptions\" services were skipped: they are billed per new post by the provider, which the API v2 contract does not report. Use a normal service with the Subscriptions service type instead." : ''));
+        $this->success("{$n} services imported/updated." . ($skipped ? " {$skipped} skipped." : ''));
         return $this->back($request, admin_url('providers/' . $id . '/services'));
     }
 
     public function syncPrices(Request $request): Response
     {
         $r = ProviderSyncService::syncServicePrices($request->int('provider_id') ?: null);
-        $this->success("Price sync: {$r['updated']} services updated, {$r['disabled']} disabled (no longer offered).");
+        $prot = $r['protection'] ? ' Price protection: ' . implode(', ', array_map(static fn ($k, $n) => "{$n} {$k}", array_keys($r['protection']), $r['protection'])) . '.' : '';
+        $this->success("Price sync: {$r['updated']} services updated, {$r['disabled']} disabled (no longer offered).{$prot}");
         return $this->back($request, admin_url('providers'));
     }
 

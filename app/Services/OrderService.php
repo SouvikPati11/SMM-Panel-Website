@@ -205,9 +205,18 @@ final class OrderService
         if (!empty(self::TYPES[$service['type']]['subscription']) && empty($attach['subscription_id'])) {
             throw new ValidationException('"' . $service['name'] . '" is a subscription service: order it from the New order page as an auto-subscription.');
         }
-        $params = self::validateInput($service, $input);
-        $rate = self::userRate($service, $user);
-        $charge = self::computeCharge($service, $rate, $params['quantity'], $params['runs']);
+        if (isset($attach['posts'])) {
+            // Post-based subscription: validated by SubscriptionService::validatePosts(); one provider
+            // order carries username/min/max/posts/old_posts/delay/expiry and the full prepaid reserve.
+            $params = ['link' => (string) $attach['posts']['link'], 'quantity' => (int) $attach['posts']['quantity'], 'runs' => null, 'interval' => null, 'extra' => $attach['posts']['extra']];
+            $rate = (string) $attach['posts']['rate'];
+            $charge = (string) $attach['posts']['charge'];
+        } else {
+            $params = self::validateInput($service, $input);
+            $rate = self::userRate($service, $user);
+            $charge = self::computeCharge($service, $rate, $params['quantity'], $params['runs']);
+        }
+        PriceProtection::assertSellable($service, $rate);
 
         if (!Money::isPositive($charge)) {
             throw new ValidationException('This order amount is too small to process.');
@@ -305,7 +314,11 @@ final class OrderService
 
         $params = ['service' => $service['provider_service_id'], 'link' => $order['link']];
         $def = self::TYPES[$service['type']] ?? self::TYPES['default'];
-        if ($def['quantity']) {
+        $postsSub = $order['subscription_id'] && $db->fetchColumn("SELECT mode FROM subscriptions WHERE id = ?", [(int) $order['subscription_id']]) === 'posts';
+        if ($postsSub) {
+            // API v2 "Subscriptions": service, username, min, max, posts, old_posts, delay, expiry — no link/quantity.
+            $params = ['service' => $service['provider_service_id']];
+        } elseif ($def['quantity']) {
             $params['quantity'] = (int) $order['quantity'];
         }
         foreach (json_decode((string) $order['extra'], true) ?: [] as $k => $v) {
@@ -345,6 +358,7 @@ final class OrderService
         if ($e->isDefinitiveRejection()) {
             $db->update('orders', ['submit_state' => 'failed', 'last_error' => $msg, 'updated_at' => now()], ['id' => $id]);
             self::refund($id, null, 'fail', 'failed', 'Provider rejected order: ' . $msg);
+            self::closeSubscriptionOnFailure($order, 'Provider rejected the subscription: ' . $msg);
             NotificationService::notify((int) $order['user_id'], 'order', "Order #{$id} could not be placed", 'The provider rejected this order. The full amount has been refunded to your balance.', '/orders/' . $id);
             return 'failed';
         }
@@ -357,6 +371,7 @@ final class OrderService
             // Never reached the provider after many attempts — safe to refund.
             $db->update('orders', ['submit_state' => 'failed', 'last_error' => $msg, 'updated_at' => now()], ['id' => $id]);
             self::refund($id, null, 'fail', 'failed', 'Provider unreachable after retries: ' . $msg);
+            self::closeSubscriptionOnFailure($order, 'Provider unreachable: ' . $msg);
             NotificationService::notify((int) $order['user_id'], 'order', "Order #{$id} failed", 'We could not reach the service provider. The full amount has been refunded.', '/orders/' . $id);
             return 'failed';
         }
@@ -365,6 +380,14 @@ final class OrderService
         self::log($id, 'submit_unknown', null, null, 'Submission outcome unknown (needs admin review): ' . $msg);
         NotificationService::notifyAdmin("Order #{$id} needs review", '<p>The provider response for order #' . $id . ' was ambiguous (' . e($msg) . '). Check the provider panel, then mark it submitted (with provider order ID) or fail it.</p>');
         return 'unknown';
+    }
+
+    /** A post subscription whose only order failed is closed as failed (its reserve was refunded with the order). */
+    private static function closeSubscriptionOnFailure(array $order, string $reason): void
+    {
+        if (!empty($order['subscription_id']) && Database::instance()->fetchColumn('SELECT mode FROM subscriptions WHERE id = ?', [(int) $order['subscription_id']]) === 'posts') {
+            SubscriptionService::reconcile((int) $order['subscription_id'], 'failed', 'system', $reason);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -421,6 +444,10 @@ final class OrderService
                 if ($order) {
                     $db->update('orders', ['last_synced_at' => now()], ['id' => $orderId]);
                 }
+                return;
+            }
+            if ($order['subscription_id'] && $db->fetchColumn('SELECT mode FROM subscriptions WHERE id = ?', [(int) $order['subscription_id']]) === 'posts') {
+                SubscriptionService::applyPostsStatus($order, $ps, $actor); // settles the reserve on final statuses
                 return;
             }
             $update = ['last_synced_at' => now(), 'updated_at' => now()];

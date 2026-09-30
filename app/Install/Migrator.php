@@ -149,8 +149,91 @@ final class Migrator
                     $db->query("INSERT INTO settings (`key`, `value`, is_secret, updated_at) VALUES ('deposit_limits_per_gateway', '1', 0, ?) ON DUPLICATE KEY UPDATE `value` = '1', updated_at = VALUES(updated_at)", [now()]);
                 }
             },
+            '2026_10_20_post_subscriptions_price_protection_gateway_bonus' => static function (Database $db): void {
+                $add = static function (string $table, array $cols) use ($db): void {
+                    foreach ($cols as $col => $ddl) {
+                        if (!self::columnExists($db, $table, $col)) {
+                            $db->pdo()->exec("ALTER TABLE {$table} ADD COLUMN {$ddl}");
+                        }
+                    }
+                };
+                // --- Post-based subscriptions (username / new & old posts / min-max / delay / expiry)
+                $add('services', [
+                    'subscription_mode' => "subscription_mode ENUM('scheduled','posts') NOT NULL DEFAULT 'scheduled' AFTER subscription_enabled",
+                    'subscription_delays' => 'subscription_delays VARCHAR(200) NULL AFTER subscription_max_cycles',
+                    'subscription_max_expiry_days' => 'subscription_max_expiry_days SMALLINT UNSIGNED NULL AFTER subscription_delays',
+                    'subscription_old_posts_max' => 'subscription_old_posts_max SMALLINT UNSIGNED NULL AFTER subscription_max_expiry_days',
+                    // Provider price protection flags (set by ProviderSyncService, cleared when safe again)
+                    'price_blocked' => 'price_blocked TINYINT(1) NOT NULL DEFAULT 0 AFTER auto_sync',
+                    'price_disabled' => 'price_disabled TINYINT(1) NOT NULL DEFAULT 0 AFTER price_blocked',
+                ]);
+                $add('subscriptions', [
+                    'mode' => "mode ENUM('scheduled','posts') NOT NULL DEFAULT 'scheduled' AFTER service_id",
+                    'qty_min' => 'qty_min INT UNSIGNED NULL AFTER quantity',
+                    'old_posts' => 'old_posts SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER qty_min',
+                    'delay_minutes' => 'delay_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER old_posts',
+                    'expires_at' => 'expires_at DATETIME NULL AFTER delay_minutes',
+                    'rate' => 'rate DECIMAL(18,6) NULL AFTER expires_at',
+                    'cost_rate' => 'cost_rate DECIMAL(18,6) NULL AFTER rate',
+                    'prepaid' => 'prepaid DECIMAL(18,6) NULL AFTER cost_rate',
+                    'final_charge' => 'final_charge DECIMAL(18,6) NULL AFTER prepaid',
+                    'refunded' => 'refunded DECIMAL(18,6) NOT NULL DEFAULT 0.000000 AFTER final_charge',
+                    'provider_status' => 'provider_status VARCHAR(40) NULL AFTER refunded',
+                ]);
+                $type = (string) $db->fetchColumn("SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'subscriptions' AND column_name = 'status'");
+                if (!str_contains($type, "'expired'")) {
+                    $db->pdo()->exec("ALTER TABLE subscriptions MODIFY status ENUM('active','paused','completed','cancelled','suspended','expired','failed') NOT NULL DEFAULT 'active'");
+                }
+                // --- Provider price protection history
+                $db->pdo()->exec(self::PRICE_EVENTS_DDL);
+                // --- Deposit bonus per payment gateway (snapshotted on each payment / manual request)
+                $add('payment_methods', [
+                    'bonus_percent' => 'bonus_percent DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER fee_percent',
+                    'bonus_fixed' => 'bonus_fixed DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER bonus_percent',
+                    'bonus_min_amount' => 'bonus_min_amount DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER bonus_fixed',
+                ]);
+                foreach (['payments' => 'bonus_amount', 'manual_payment_requests' => 'coupon_id'] as $table => $after) {
+                    $add($table, [
+                        'gw_bonus_percent' => "gw_bonus_percent DECIMAL(5,2) NULL AFTER {$after}",
+                        'gw_bonus_fixed' => 'gw_bonus_fixed DECIMAL(18,4) NULL AFTER gw_bonus_percent',
+                        'gw_bonus_min' => 'gw_bonus_min DECIMAL(18,4) NULL AFTER gw_bonus_fixed',
+                    ]);
+                }
+                $add('payments', ['gw_bonus_amount' => 'gw_bonus_amount DECIMAL(18,4) NOT NULL DEFAULT 0.0000 AFTER gw_bonus_min']);
+                // --- Category platform (order-page shortcuts), filled once from the category name
+                $add('categories', ['platform' => 'platform VARCHAR(20) NULL AFTER slug']);
+                foreach ($db->fetchAll('SELECT id, name FROM categories WHERE platform IS NULL') as $c) {
+                    $db->update('categories', ['platform' => \App\Helpers\Platforms::detect((string) $c['name'])], ['id' => $c['id']]);
+                }
+                foreach ([
+                    'price_protection_mode' => 'protect', 'price_protection_margin' => '0',
+                    'recaptcha_enabled' => '0', 'recaptcha_version' => 'v2', 'recaptcha_site_key' => '', 'recaptcha_min_score' => '0.5',
+                    'social_tiktok' => '',
+                ] as $k => $v) {
+                    $db->query('INSERT IGNORE INTO settings (`key`, `value`, is_secret, updated_at) VALUES (?, ?, 0, ?)', [$k, $v, now()]);
+                }
+            },
         ];
     }
+
+    public const PRICE_EVENTS_DDL = "CREATE TABLE IF NOT EXISTS service_price_events (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  service_id   INT UNSIGNED NOT NULL,
+  provider_id  INT UNSIGNED NULL,
+  old_cost     DECIMAL(18,6) NULL,
+  new_cost     DECIMAL(18,6) NULL,
+  old_rate     DECIMAL(18,6) NULL,
+  new_rate     DECIMAL(18,6) NULL,
+  safe_rate    DECIMAL(18,6) NULL,
+  action       VARCHAR(20) NOT NULL,
+  mode         VARCHAR(20) NOT NULL,
+  message      VARCHAR(500) NULL,
+  created_at   DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_spe_service (service_id, id),
+  KEY idx_spe_created (created_at),
+  CONSTRAINT fk_spe_service FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
     public const SOCIAL_ACCOUNTS_DDL = "CREATE TABLE IF NOT EXISTS user_social_accounts (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

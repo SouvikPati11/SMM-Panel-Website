@@ -14,6 +14,7 @@ use App\Core\Response;
 use App\Core\Validator;
 use App\Services\AuditService;
 use App\Services\OrderService;
+use App\Services\PriceProtection;
 use App\Services\SubscriptionService;
 
 final class ServiceController extends Controller
@@ -40,6 +41,9 @@ final class ServiceController extends Controller
             $params[] = $status;
         } elseif ($status === 'hidden') {
             $where .= ' AND s.is_hidden = 1';
+        }
+        if ($status === 'price') {
+            $where .= ' AND (s.price_blocked = 1 OR s.price_disabled = 1)';
         }
         $type = $request->str('type');
         if ($type === 'subscription') {
@@ -69,6 +73,27 @@ final class ServiceController extends Controller
             'providers' => $db->fetchPairs('SELECT id, name FROM providers ORDER BY name'),
             'types' => array_map(static fn ($t) => $t['label'], OrderService::TYPES),
             'f' => ['category' => $request->int('category'), 'provider' => $request->str('provider'), 'status' => $status, 'q' => $q, 'type' => $type],
+        ]);
+    }
+
+    /** Provider price protection: services needing attention + the history of cost/price events. */
+    public function priceChanges(Request $request): Response
+    {
+        $events = Paginator::query(
+            'e.*, s.name AS service, p.name AS provider',
+            'FROM service_price_events e JOIN services s ON s.id = e.service_id LEFT JOIN providers p ON p.id = e.provider_id' . ($request->int('service') ? ' WHERE e.service_id = ' . $request->int('service') : ''),
+            [],
+            'e.id DESC',
+            $this->pageNum($request),
+            50
+        );
+        return $this->view('admin/services/price-changes', [
+            'title' => 'Price changes',
+            'alerts' => PriceProtection::alerts(),
+            'events' => $events,
+            'mode' => PriceProtection::mode(),
+            'margin' => PriceProtection::margin(),
+            'maxDiscount' => PriceProtection::maxDiscount(),
         ]);
     }
 
@@ -103,6 +128,7 @@ final class ServiceController extends Controller
             'custom' => json_decode((string) ($service['custom_fields'] ?? ''), true) ?: [],
             'orders' => $service ? (int) $db->fetchColumn('SELECT COUNT(*) FROM orders WHERE service_id = ?', [$service['id']]) : 0,
             'intervals' => SubscriptionService::INTERVALS,
+            'delays' => SubscriptionService::DELAYS,
             'maxCycles' => SubscriptionService::maxCycles(),
         ]);
     }
@@ -149,15 +175,31 @@ final class ServiceController extends Controller
         $isSubType = $data['type'] === 'subscription';
         $allowSub = $isSubType || $request->bool('subscription_enabled');
         $intervals = array_values(array_intersect(array_map('intval', (array) ($request->post()['subscription_intervals'] ?? [])), array_keys(SubscriptionService::INTERVALS)));
+        $subMode = $isSubType && $request->str('subscription_mode') === 'posts' ? 'posts' : 'scheduled';
+        $floor = $subMode === 'posts' ? 1 : 2;
+        $what = $subMode === 'posts' ? 'new posts' : 'deliveries';
         $subMin = $request->str('subscription_min_cycles');
         $subMax = $request->str('subscription_max_cycles');
-        foreach (['Minimum deliveries' => $subMin, 'Maximum deliveries' => $subMax] as $label => $v) {
-            if ($v !== '' && (!ctype_digit($v) || (int) $v < 2 || (int) $v > 1000)) {
-                throw new ValidationException("{$label} must be a whole number from 2 to 1000 (or empty for the default).");
+        foreach (['Minimum ' . $what => $subMin, 'Maximum ' . $what => $subMax] as $label => $v) {
+            if ($v !== '' && (!ctype_digit($v) || (int) $v < $floor || (int) $v > 1000)) {
+                throw new ValidationException("{$label} must be a whole number from {$floor} to 1000 (or empty for the default).");
             }
         }
         if ($subMin !== '' && $subMax !== '' && (int) $subMin > (int) $subMax) {
-            throw new ValidationException('Minimum deliveries cannot be greater than maximum deliveries.');
+            throw new ValidationException("Minimum {$what} cannot be greater than maximum {$what}.");
+        }
+        // Post-based settings: allowed delays, old posts, expiry
+        $delays = array_values(array_intersect(array_map('intval', (array) ($request->post()['subscription_delays'] ?? [])), array_keys(SubscriptionService::DELAYS)));
+        if ($subMode === 'posts' && !$delays) {
+            throw new ValidationException('Tick at least one allowed delay (for example "No delay").');
+        }
+        $oldMax = $request->str('subscription_old_posts_max');
+        $expDays = $request->str('subscription_max_expiry_days');
+        if ($oldMax !== '' && (!ctype_digit($oldMax) || (int) $oldMax > 10000)) {
+            throw new ValidationException('Maximum old posts must be a whole number from 0 to 10000 (0 or empty = old posts not offered).');
+        }
+        if ($expDays !== '' && (!ctype_digit($expDays) || (int) $expDays < 1 || (int) $expDays > 3650)) {
+            throw new ValidationException('Maximum expiry must be between 1 and 3650 days (or empty for no expiry limit).');
         }
         if ($isSubType && !SubscriptionService::enabled()) {
             $this->error('Saved, but auto-subscriptions are switched off in Settings → Orders, so users cannot order this service until you enable them.');
@@ -184,6 +226,10 @@ final class ServiceController extends Controller
             'subscription_intervals' => $allowSub && $intervals && count($intervals) < count(SubscriptionService::INTERVALS) ? implode(',', $intervals) : null,
             'subscription_min_cycles' => $allowSub && $subMin !== '' ? (int) $subMin : null,
             'subscription_max_cycles' => $allowSub && $subMax !== '' ? (int) $subMax : null,
+            'subscription_mode' => $subMode,
+            'subscription_delays' => $subMode === 'posts' && count($delays) < count(SubscriptionService::DELAYS) ? implode(',', $delays) : null,
+            'subscription_old_posts_max' => $subMode === 'posts' && $oldMax !== '' ? (int) $oldMax : null,
+            'subscription_max_expiry_days' => $subMode === 'posts' && $expDays !== '' ? (int) $expDays : null,
             'refill' => $request->bool('refill') ? 1 : 0,
             'refill_days' => (int) ($data['refill_days'] ?: 30),
             'cancel' => $request->bool('cancel') ? 1 : 0,
@@ -204,7 +250,21 @@ final class ServiceController extends Controller
             $id = $db->insert('services', $row + ['created_at' => now()]);
             AuditService::log('service.create', 'service', $id, ['name' => $row['name'], 'rate' => $row['rate']]);
         }
-        $this->success('Service saved.');
+        // Provider price protection also applies to prices set by hand.
+        $fresh = $db->fetch('SELECT * FROM services WHERE id = ?', [$id]);
+        $note = '';
+        if ($fresh['provider_id'] && $fresh['provider_rate'] !== null && Money::isPositive((string) $fresh['provider_rate'])) {
+            $cost = Money::of((string) $fresh['provider_rate']);
+            $action = PriceProtection::evaluate($fresh, $cost, $cost, 'admin edit');
+            $note = match ($action) {
+                'blocked' => ' Ordering is blocked: the price is below the safe minimum ' . rate(PriceProtection::safeRate($cost)) . ' (provider cost + margin, allowing for the largest user discount).',
+                'repriced' => ' The price was raised to the safe minimum ' . rate(PriceProtection::safeRate($cost)) . ' (protection mode: auto-adjust).',
+                'disabled' => ' The service was disabled: its price is below the safe minimum ' . rate(PriceProtection::safeRate($cost)) . '.',
+                'unblocked', 'restored' => ' The price is safe again, so the service can be ordered.',
+                default => '',
+            };
+        }
+        $note !== '' && !in_array($action ?? '', ['unblocked', 'restored'], true) ? $this->error('Service saved.' . $note) : $this->success('Service saved.' . $note);
         return Response::redirect(admin_url('services/' . $id . '/edit'));
     }
 

@@ -287,7 +287,9 @@ T::test('Subscription service type: admin creates it with per-service schedule; 
     // Order page marks it subscription-only with its own schedule; the API does not list it.
     login_as_user($u);
     $html = http('GET', '/order')->body();
-    T::true((bool) preg_match('/"id":' . $svc['id'] . ',[^}]*"so":true,"si":\["24","168"\],"smi":3,"sma":10/', $html), 'catalog data carries subscription-only + schedule');
+    preg_match('#<script type="application/json" id="services-data">(.*?)</script>#s', $html, $m);
+    $row = array_values(array_filter(json_decode($m[1] ?? '{}', true)['services'] ?? [], static fn ($x) => $x['id'] === (int) $svc['id']))[0] ?? [];
+    T::eq([true, 'scheduled', ['24', '168'], 3, 10], [$row['so'] ?? null, $row['sm'] ?? null, $row['si'] ?? null, $row['smi'] ?? null, $row['sma'] ?? null], 'catalog data carries subscription-only + schedule');
     $q = http('POST', '/order/quote', ['_token' => csrf(), 'service' => $svc['id'], 'link' => 'https://instagram.com/x', 'quantity' => '1000'], ['HTTP_ACCEPT' => 'application/json']);
     T::true(str_contains($q->body(), 'is a subscription service'), 'one-time quote refused');
     $q = http('POST', '/order/quote', ['_token' => csrf(), 'service' => $svc['id'], 'link' => 'https://instagram.com/x', 'quantity' => '1000', 'order_type' => 'subscription', 'sub_interval' => '24', 'sub_cycles' => '4'], ['HTTP_ACCEPT' => 'application/json']);

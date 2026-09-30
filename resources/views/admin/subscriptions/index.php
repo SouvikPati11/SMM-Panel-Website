@@ -15,15 +15,15 @@
 <div class="card">
   <?php if (!$subs->items): ?><div class="empty"><?= icon('clock') ?><h3>No subscriptions</h3><p>Enable "Allow auto-subscriptions" on a service to let users subscribe.</p></div><?php else: ?>
   <div class="table-wrap"><table class="table table-cards">
-    <thead><tr><th>ID</th><th>User</th><th>Service</th><th class="num">Qty</th><th>Progress</th><th>Next run</th><th>Status</th></tr></thead>
-    <tbody><?php foreach ($subs->items as $s): ?>
+    <thead><tr><th>ID</th><th>User</th><th>Service</th><th class="num">Quantity</th><th>Progress</th><th>Next run / expiry</th><th>Status</th></tr></thead>
+    <tbody><?php foreach ($subs->items as $s): $sm = \App\Services\SubscriptionService::summary($s); ?>
       <tr>
         <td data-label="ID"><a class="mono" href="<?= e(admin_url('subscriptions/' . $s['id'])) ?>">#<?= (int) $s['id'] ?></a></td>
         <td data-label="User"><a href="<?= e(admin_url('users/' . $s['user_id'])) ?>"><?= e($s['username']) ?></a></td>
-        <td class="cell-main"><span class="cell-title"><?= e(str_limit($s['service'], 60)) ?></span><div class="cell-sub"><?= e(\App\Services\SubscriptionService::INTERVALS[(int) $s['interval_hours']] ?? '') ?></div><?php if ($s['last_error'] && in_array($s['status'], ['active', 'suspended'], true)): ?><div class="cell-sub text-danger break"><?= e(str_limit($s['last_error'], 120)) ?> (attempt <?= (int) $s['attempts'] ?>)</div><?php endif ?></td>
-        <td data-label="Qty" class="num"><?= number_format((int) $s['quantity']) ?></td>
-        <td data-label="Progress"><div class="progress-line"><span class="progress" aria-hidden="true"><span style="width:<?= (int) round(100 * (int) $s['completed_cycles'] / max(1, (int) $s['total_cycles'])) ?>%"></span></span><span class="text-sm nowrap"><?= (int) $s['completed_cycles'] ?> / <?= (int) $s['total_cycles'] ?></span></div></td>
-        <td data-label="Next run" class="text-sm nowrap"><?= $s['status'] === 'active' && $s['next_run_at'] ? e(fmt_date($s['next_run_at'])) : '—' ?></td>
+        <td class="cell-main"><span class="cell-title"><?= e(str_limit($s['service'], 60)) ?></span><div class="cell-sub"><?= e($sm['kind'] . ' · ' . $sm['schedule']) ?></div><?php if ($sm['posts']): ?><div class="cell-sub mono break-words"><?= e($s['link']) ?></div><?php endif ?><?php if ($s['last_error'] && in_array($s['status'], ['active', 'suspended'], true)): ?><div class="cell-sub text-danger break"><?= e(str_limit($s['last_error'], 120)) ?> (attempt <?= (int) $s['attempts'] ?>)</div><?php endif ?></td>
+        <td data-label="Quantity" class="num nowrap"><?= e($sm['qty']) ?></td>
+        <td data-label="Progress"><div class="progress-line"><span class="progress" aria-hidden="true"><span style="width:<?= (int) round(100 * $sm['done'] / max(1, $sm['total'])) ?>%"></span></span><span class="text-sm nowrap"><?= $sm['done'] ?> / <?= $sm['total'] ?></span></div></td>
+        <td data-label="<?= $sm['posts'] ? 'Expiry' : 'Next run' ?>" class="text-sm nowrap"><?= $sm['posts'] ? e($sm['expiry']) : ($s['status'] === 'active' && $s['next_run_at'] ? e(fmt_date($s['next_run_at'])) : '—') ?></td>
         <td data-label="Status"><?= status_badge($s['status']) ?></td>
       </tr>
     <?php endforeach ?></tbody></table></div>

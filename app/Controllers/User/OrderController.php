@@ -22,11 +22,11 @@ final class OrderController extends Controller
     {
         $db = Database::instance();
         $categories = $db->fetchAll(
-            "SELECT DISTINCT c.id, c.name, c.sort_order FROM categories c JOIN services s ON s.category_id = c.id
+            "SELECT DISTINCT c.id, c.name, c.platform, c.sort_order FROM categories c JOIN services s ON s.category_id = c.id
              WHERE c.status = 'active' AND s.status = 'active' AND s.is_hidden = 0 ORDER BY c.sort_order, c.name"
         );
         $rows = $db->fetchAll(
-            "SELECT s.id, s.category_id, s.name, s.rate, s.type, s.link_label, s.min_quantity, s.max_quantity, s.dripfeed, s.subscription_enabled, s.subscription_intervals, s.subscription_min_cycles, s.subscription_max_cycles, s.refill, s.cancel, s.average_time, s.custom_fields
+            "SELECT s.id, s.category_id, s.name, s.rate, s.type, s.link_label, s.min_quantity, s.max_quantity, s.dripfeed, s.subscription_enabled, s.subscription_intervals, s.subscription_min_cycles, s.subscription_max_cycles, s.subscription_mode, s.subscription_delays, s.subscription_old_posts_max, s.subscription_max_expiry_days, s.refill, s.cancel, s.average_time, s.custom_fields
              FROM services s JOIN categories c ON c.id = s.category_id
              WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active' ORDER BY c.sort_order, s.sort_order, s.id"
         );
@@ -43,7 +43,8 @@ final class OrderController extends Controller
                 'lt' => $custom['link_type'] ?? 'url',
                 'mi' => (int) $s['min_quantity'], 'ma' => (int) $s['max_quantity'],
                 'df' => (int) $s['dripfeed'] === 1, 'rf' => (int) $s['refill'] === 1, 'cn' => (int) $s['cancel'] === 1,
-                'sb' => $sub['allowed'], 'so' => $sub['only'],
+                'sb' => $sub['allowed'], 'so' => $sub['only'], 'sm' => $sub['mode'],
+                'dl' => $sub['mode'] === 'posts' ? array_map('strval', array_keys($sub['delays'])) : [], 'om' => $sub['old_posts_max'], 'ed' => $sub['expiry_days'],
                 'si' => $sub['allowed'] ? array_map('strval', array_keys($sub['intervals'])) : [], 'smi' => $sub['min'], 'sma' => $sub['max'],
                 't' => (string) $s['average_time'], 'pk' => OrderService::TYPES[$s['type']]['package'] ?? false,
             ];
@@ -95,6 +96,9 @@ final class OrderController extends Controller
         $user = $this->user();
         $service = OrderService::orderableService($request->int('service'));
         $isSub = $request->str('order_type') === 'subscription';
+        if ($isSub && SubscriptionService::options($service)['mode'] === 'posts') {
+            return $this->json($this->postsQuote($service, $user, $request));
+        }
         $input = $this->orderInput($request);
         if ($isSub) {
             unset($input['dripfeed'], $input['runs'], $input['interval']);
@@ -146,10 +150,64 @@ final class OrderController extends Controller
         return $this->json($out);
     }
 
+    private function postsInput(Request $request): array
+    {
+        return [
+            'username' => $request->str('sub_username'), 'posts' => $request->str('sub_posts'), 'old_posts' => $request->str('sub_old_posts'),
+            'min' => $request->str('sub_min'), 'max' => $request->str('sub_max'), 'delay' => $request->str('sub_delay'), 'expiry' => $request->str('sub_expiry'),
+        ];
+    }
+
+    /** Server-side quote for a post-based subscription: everything the confirmation dialog shows. */
+    private function postsQuote(array $service, array $user, Request $request): array
+    {
+        $p = SubscriptionService::validatePosts($service, $this->postsInput($request));
+        $rate = OrderService::userRate($service, $user);
+        \App\Services\PriceProtection::assertSellable($service, $rate);
+        $reserve = SubscriptionService::postsReserve($rate, $p);
+        if (!Money::isPositive($reserve)) {
+            throw new ValidationException('This order amount is too small to process.');
+        }
+        $minOrder = (string) setting('min_order_amount', '0');
+        if (Money::isNumeric($minOrder) && Money::cmp($reserve, $minOrder) < 0) {
+            throw new ValidationException('The minimum order amount is ' . money($minOrder) . '.');
+        }
+        $perPostMax = Money::divInt(Money::mul($rate, (string) $p['max']), 1000);
+        return [
+            'ok' => true,
+            'service' => ['id' => (int) $service['id'], 'name' => $service['name'], 'refill' => (int) $service['refill'] === 1, 'cancel' => (int) $service['cancel'] === 1, 'average_time' => (string) $service['average_time']],
+            'posts' => [
+                'username' => $p['username'], 'posts' => $p['posts'], 'old_posts' => $p['old_posts'],
+                'quantity' => number_format($p['min']) . ' – ' . number_format($p['max']) . ' per post',
+                'delay' => SubscriptionService::DELAYS[$p['delay']], 'expiry' => $p['expiry'] ? fmt_date($p['expires_at'], 'M j, Y') : 'No expiry',
+                'per_post' => money(Money::divInt(Money::mul($rate, (string) $p['min']), 1000)) . ' – ' . money($perPostMax),
+                'reserve' => money($reserve),
+            ],
+            'rate' => rate($rate) . ' per 1000',
+            'charge' => money($reserve),
+            'charge_base' => money_base($reserve),
+            'balance' => money($user['balance']),
+            'insufficient' => Money::cmp((string) $user['balance'], $reserve) < 0,
+            'notes' => [
+                'The maximum possible cost (' . money($reserve) . ') is reserved from your balance now.',
+                'When the subscription finishes, expires or is cancelled, the unused part is returned to your balance automatically.',
+            ],
+        ];
+    }
+
     public function store(Request $request): Response
     {
         $user = $this->user();
         $formKey = $request->str('form_key') ?: null;
+        if ($request->str('order_type') === 'subscription' && SubscriptionService::options(OrderService::orderableService($request->int('service')))['mode'] === 'posts') {
+            $sub = SubscriptionService::createPosts((int) $user['id'], $request->int('service'), $this->postsInput($request), $formKey ? 'web:' . $formKey : null);
+            $msg = !empty($sub['duplicate']) ? 'This subscription was already created (#' . $sub['id'] . ').' : 'Subscription #' . $sub['id'] . ' created — ' . money($sub['prepaid']) . ' reserved; the unused part is refunded when it ends.';
+            if ($request->wantsJson()) {
+                return $this->json(['ok' => true, 'type' => 'subscription', 'subscription_id' => (int) $sub['id'], 'order_id' => (int) $sub['last_order_id'], 'message' => $msg, 'url' => url('/subscriptions/' . $sub['id']), 'form_key' => bin2hex(random_bytes(16))]);
+            }
+            $this->success($msg);
+            return $this->redirect('/subscriptions/' . $sub['id']);
+        }
         if ($request->str('order_type') === 'subscription') {
             $sub = SubscriptionService::create((int) $user['id'], $request->int('service'), $this->orderInput($request), $request->int('sub_interval'), $request->int('sub_cycles'), $formKey ? 'web:' . $formKey : null);
             $msg = !empty($sub['duplicate']) ? 'This subscription was already created (#' . $sub['id'] . ').' : 'Subscription #' . $sub['id'] . ' created — first delivery ordered (order #' . $sub['last_order_id'] . ').';

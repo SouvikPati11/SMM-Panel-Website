@@ -54,6 +54,7 @@ $router->group(['prefix' => $prefix, 'middleware' => ['csrf']], static function 
         // Catalog
         $router->get('/services', [Admin\ServiceController::class, 'index'], 'admin.services', ['perm:services.manage']);
         $router->get('/services/create', [Admin\ServiceController::class, 'create'], 'admin.services.create', ['perm:services.manage']);
+        $router->get('/services/price-changes', [Admin\ServiceController::class, 'priceChanges'], 'admin.services.prices', ['perm:services.manage']);
         $router->get('/services/{id}/edit', [Admin\ServiceController::class, 'edit'], 'admin.services.edit', ['perm:services.manage']);
         $router->post('/services/save', [Admin\ServiceController::class, 'save'], 'admin.services.save', ['perm:services.manage']);
         $router->post('/services/bulk', [Admin\ServiceController::class, 'bulk'], 'admin.services.bulk', ['perm:services.manage']);

@@ -144,7 +144,7 @@ T::test('Provider states: connected, error, never checked, syncing, disabled', f
     T::true(!$r['ok'] && str_contains($r['error'], 'Internal error'), $r['error'] ?? '');
 });
 
-T::test('Admin providers: add (HTTPS required unless allowed), edit keeps key, list shows states, import skips provider subscriptions', function () use ($provAdmin, $serve, $pdb) {
+T::test('Admin providers: add (HTTPS required unless allowed), edit keeps key, list shows states, provider subscriptions import as post-based', function () use ($provAdmin, $serve, $pdb) {
     login_as_admin($provAdmin);
     $serve('{"balance":"55.10","currency":"USD"}');
     $save = ['_token' => csrf(), 'name' => 'SMM Exporter', 'api_url' => ' https://provider.test/api/v2 ', 'api_key' => 'provkey123', 'currency' => 'USD', 'exchange_rate' => '1', 'timeout' => '30', 'adapter' => 'standard_v2', 'status' => 'active', 'config' => ''];
@@ -173,7 +173,7 @@ T::test('Admin providers: add (HTTPS required unless allowed), edit keeps key, l
     $html = http('GET', '/' . admin_path() . '/providers')->body();
     T::true(str_contains($html, 'Unexpected balance response') && str_contains($html, 'View the full response in the API log'));
     T::true(str_contains($html, '>Connected<') && str_contains($html, '>Error<') && !str_contains($html, 'provkey123'));
-    // Catalog with a provider-side subscription service: fetched, but not importable.
+    // Catalog with a provider-side subscription service: imported as a post-based Subscriptions service.
     $serve(json_encode([
         ['service' => 11, 'name' => 'IG Likes', 'category' => 'Instagram', 'type' => 'Default', 'rate' => '0.5', 'min' => 10, 'max' => 1000],
         ['service' => 12, 'name' => 'IG Auto Likes', 'category' => 'Instagram', 'type' => 'Subscriptions', 'rate' => '0.9', 'min' => 10, 'max' => 1000],
@@ -181,8 +181,10 @@ T::test('Admin providers: add (HTTPS required unless allowed), edit keeps key, l
     http('POST', '/' . admin_path() . '/providers/' . $p['id'] . '/fetch', ['_token' => csrf()]);
     T::true(str_contains(end($_SESSION['_flash'])['message'], '1 of them are provider-side subscriptions'));
     http('POST', '/' . admin_path() . '/providers/' . $p['id'] . '/import', ['_token' => csrf(), 'ids' => ['11', '12'], 'markup' => '20', 'category_mode' => 'provider']);
-    T::true(str_contains(end($_SESSION['_flash'])['message'], '1 services imported') && str_contains(end($_SESSION['_flash'])['message'], '1 provider-side "Subscriptions"'));
-    T::eq(1, (int) $pdb->fetchColumn('SELECT COUNT(*) FROM services WHERE provider_id = ?', [$p['id']]));
+    T::true(str_contains(end($_SESSION['_flash'])['message'], '2 services imported'));
+    T::eq(2, (int) $pdb->fetchColumn('SELECT COUNT(*) FROM services WHERE provider_id = ?', [$p['id']]));
+    T::eq(['subscription', 'posts', 1, 'Username'], array_values($pdb->fetch("SELECT type, subscription_mode, subscription_enabled, link_label FROM services WHERE provider_id = ? AND provider_service_id = '12'", [$p['id']])));
+    T::eq(['default', 'scheduled'], array_values($pdb->fetch("SELECT type, subscription_mode FROM services WHERE provider_id = ? AND provider_service_id = '11'", [$p['id']])));
     T::eq('0.600000', $pdb->fetchColumn("SELECT rate FROM services WHERE provider_id = ? AND provider_service_id = '11'", [$p['id']]), '20% markup');
     unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
 });

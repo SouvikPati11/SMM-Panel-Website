@@ -148,12 +148,18 @@
     var typeSel = $('[data-service-type]'), card = $('#sub-settings'), wrap = $('[data-sub-toggle]');
     if (!typeSel || !card) return;
     var toggle = wrap && $('input[type="checkbox"]', wrap);
+    var modeSel = $('[data-sub-mode]');
     function sync() {
       var isType = typeSel.value === 'subscription';
       if (wrap) wrap.hidden = isType;
       card.hidden = !(isType || (toggle && toggle.checked));
+      // Post-based subscriptions exist only for the "Subscriptions" type; "also allow" = scheduled repeats.
+      var mode = isType && modeSel ? modeSel.value : 'scheduled';
+      $$('[data-sub-type-only]', card).forEach(function (el) { el.hidden = !isType; });
+      $$('[data-sub-panel]', card).forEach(function (el) { el.hidden = el.getAttribute('data-sub-panel') !== mode; });
     }
     typeSel.addEventListener('change', sync);
+    if (modeSel) modeSel.addEventListener('change', sync);
     if (toggle) toggle.addEventListener('change', sync);
     sync();
   })();
@@ -408,6 +414,31 @@
     var quoteSeq = 0, quoteTimer = null, quoteCtl = null, busy = false, lastQuote = null;
 
     function isSub() { var r = $('input[name="order_type"]:checked'); return !!r && r.value === 'subscription'; }
+    // Post-based subscription (username / new & old posts / min-max / delay / expiry) for the selected service?
+    function isPosts() { var s = byId[svcSel.value]; return !!s && s.sb && s.sm === 'posts' && isSub(); }
+    function num(id) { var el = $('#' + id); return el ? Math.max(0, parseInt(el.value, 10) || 0) : 0; }
+    function isoDate(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function setupPosts(s) {
+      var posts = $('#sub_posts'), old = $('#sub_old_posts'), mn = $('#sub_min'), mx = $('#sub_max'), dl = $('#sub_delay'), ex = $('#sub_expiry');
+      if (!posts) return;
+      posts.min = s.smi; posts.max = s.sma;
+      if (num('sub_posts') < s.smi || num('sub_posts') > s.sma) posts.value = s.smi;
+      $('#sub-posts-hint').textContent = s.smi + '–' + s.sma + ' posts';
+      show('field-old-posts', s.om > 0);
+      old.max = s.om; if (num('sub_old_posts') > s.om) old.value = 0;
+      $('#sub-old-hint').textContent = s.om > 0 ? 'Up to ' + s.om + ' existing posts' : '';
+      [mn, mx].forEach(function (el) { el.min = s.mi; el.max = s.ma; });
+      if (!mn.value || num('sub_min') < s.mi || num('sub_min') > s.ma) mn.value = s.mi;
+      if (!mx.value || num('sub_max') < s.mi || num('sub_max') > s.ma) mx.value = s.mi;
+      $('#sub-qty-hint').textContent = 'Between ' + Number(s.mi).toLocaleString() + ' and ' + Number(s.ma).toLocaleString() + ' per post';
+      var first = null;
+      $$('option', dl).forEach(function (o) { var ok = (s.dl || []).indexOf(o.value) >= 0; o.hidden = !ok; o.disabled = !ok; if (ok && first === null) first = o.value; });
+      if (dl.selectedOptions[0] && dl.selectedOptions[0].disabled) dl.value = first;
+      var t = new Date(); t.setDate(t.getDate() + 1); ex.min = isoDate(t);
+      if (s.ed) { var m = new Date(); m.setDate(m.getDate() + s.ed); ex.max = isoDate(m); $('#sub-expiry-hint').textContent = 'Up to ' + s.ed + ' days ahead (default: ' + s.ed + ' days).'; }
+      else { ex.removeAttribute('max'); $('#sub-expiry-hint').textContent = 'Optional. The subscription stops on this date.'; }
+      if (ex.value && ((ex.min && ex.value < ex.min) || (ex.max && ex.value > ex.max))) ex.value = '';
+    }
     function show(id, visible) { var el = $('#' + id); if (el) el.hidden = !visible; }
     function setIcon(el, key) { if (el) el.innerHTML = icons[key] || icons.other || ''; }
 
@@ -481,6 +512,7 @@
         $('#sub-cycles-hint').textContent = s.smi + '–' + s.sma + ' deliveries';
       }
       show('field-quantity', ['default', 'comment_likes', 'poll', 'keywords', 'subscription'].indexOf(type) >= 0);
+      if (s.sm === 'posts') setupPosts(s);
       show('field-comments', type === 'custom_comments' || type === 'custom_comments_package');
       show('field-usernames', type === 'mentions_custom_list');
       show('field-username', type === 'comment_likes');
@@ -494,12 +526,16 @@
     }
 
     function onType() {
-      var s = byId[svcSel.value], sub = isSub();
-      show('field-subscription', sub);
+      var s = byId[svcSel.value], sub = isSub(), posts = isPosts();
+      show('field-subscription', sub && !posts);
+      // Post subscriptions replace link + quantity with their own fields (a disabled fieldset is not validated or sent).
+      var fs = $('#field-subscription-posts'); if (fs) { fs.hidden = !posts; fs.disabled = !posts; }
+      show('field-link', !posts); link.disabled = posts;
+      if (s && ['default', 'comment_likes', 'poll', 'keywords', 'subscription'].indexOf(s.ty) >= 0) { show('field-quantity', !posts); if (qty) qty.disabled = posts; }
       show('field-dripfeed', !!(s && s.df) && !sub);
       if ((!s || !s.df || sub) && drip) drip.checked = false;
       show('dripfeed-fields', !!(drip && drip.checked));
-      $('#quantity-label').textContent = sub ? 'Quantity per delivery' : 'Quantity';
+      $('#quantity-label').textContent = sub && !posts ? 'Quantity per delivery' : 'Quantity';
       $('#order-submit-label').textContent = sub ? 'Review subscription' : 'Review order';
       calc();
     }
@@ -531,10 +567,17 @@
       if (s.ty === 'custom_comments' || s.ty === 'mentions_custom_list') $('#qty-count').textContent = q + ' line' + (q === 1 ? '' : 's');
       var r = drip && drip.checked ? Math.max(1, parseInt(runs.value, 10) || 1) : 1;
       total = s.pk ? rate : rate * BigInt(q) * BigInt(r) / 1000n;
-      chargeEl.textContent = money(total);
       var sub = isSub(), cycles = Math.max(0, parseInt(($('#sub_cycles') || {}).value, 10) || 0);
-      $('#charge-label').textContent = sub ? 'Charge per delivery' : 'Estimated charge';
-      $('#charge-note').textContent = sub && cycles ? '× ' + cycles + ' deliveries ≈ ' + money(total * BigInt(cycles)) + ' in total' : '';
+      if (isPosts()) {
+        // Reserve = max × (new + old posts) × rate; the server recalculates it and refunds what is unused.
+        total = rate * BigInt(num('sub_max')) * BigInt(num('sub_posts') + num('sub_old_posts')) / 1000n;
+        $('#charge-label').textContent = 'Reserved now (maximum)';
+        $('#charge-note').textContent = 'Unused posts are refunded automatically';
+      } else {
+        $('#charge-label').textContent = sub ? 'Charge per delivery' : 'Estimated charge';
+        $('#charge-note').textContent = sub && cycles ? '× ' + cycles + ' deliveries ≈ ' + money(total * BigInt(cycles)) + ' in total' : '';
+      }
+      chargeEl.textContent = money(total);
       $('#charge-warning').hidden = total <= toMicro(orderForm.getAttribute('data-balance'));
       scheduleQuote();
     }
@@ -553,7 +596,7 @@
           spinner.hidden = true; chargeEl.classList.remove('is-updating');
           if (!res.ok || !res.j.ok) { lastQuote = null; return { error: res.j.error || 'Could not calculate the price.' }; }
           lastQuote = res.j;
-          chargeEl.textContent = res.j.subscription ? res.j.subscription.per_delivery : res.j.charge;
+          chargeEl.textContent = res.j.subscription ? res.j.subscription.per_delivery : (res.j.posts ? res.j.posts.reserve : res.j.charge);
           if (res.j.subscription) $('#charge-note').textContent = '× ' + res.j.subscription.cycles + ' deliveries ≈ ' + res.j.subscription.estimated_total + ' in total';
           $('#charge-warning').hidden = !res.j.insufficient;
           quoteErr.hidden = true;
@@ -568,7 +611,8 @@
     function scheduleQuote() {
       clearTimeout(quoteTimer);
       var s = byId[svcSel.value];
-      if (!s || !link.value.trim()) return; // the server needs the link to validate
+      var target = isPosts() ? ($('#sub_username') || {}).value || '' : link.value;
+      if (!s || !target.trim()) return; // the server needs the link / username to validate
       quoteTimer = setTimeout(function () {
         requestQuote().then(function (q) { if (q && q.error) { quoteErr.textContent = q.error; quoteErr.hidden = false; } });
       }, 450);
@@ -577,7 +621,8 @@
     catSel.addEventListener('change', function () { fillServices(catSel.value); });
     svcSel.addEventListener('change', onService);
     ['input', 'change'].forEach(function (ev) {
-      [qty, runs, interval, link, $('#comments'), $('#usernames'), $('#username'), $('#answer_number'), $('#keywords'), $('#sub_cycles'), $('#sub_interval')].forEach(function (el) { if (el) el.addEventListener(ev, calc); });
+      [qty, runs, interval, link, $('#comments'), $('#usernames'), $('#username'), $('#answer_number'), $('#keywords'), $('#sub_cycles'), $('#sub_interval'),
+        $('#sub_username'), $('#sub_posts'), $('#sub_old_posts'), $('#sub_min'), $('#sub_max'), $('#sub_delay'), $('#sub_expiry')].forEach(function (el) { if (el) el.addEventListener(ev, calc); });
     });
     $$('input[name="order_type"]').forEach(function (r) { r.addEventListener('change', onType); });
     if (drip) drip.addEventListener('change', function () { show('dripfeed-fields', drip.checked); calc(); });
@@ -591,6 +636,18 @@
     function openConfirm(q) {
       var dl = $('#confirm-list'); dl.innerHTML = '';
       row(dl, 'Service', '#' + q.service.id + ' — ' + q.service.name);
+      if (q.posts) {
+        row(dl, 'Username', q.posts.username);
+        row(dl, 'New posts', String(q.posts.posts));
+        if (q.posts.old_posts) row(dl, 'Old posts', String(q.posts.old_posts));
+        row(dl, 'Quantity', q.posts.quantity);
+        row(dl, 'Delay', q.posts.delay);
+        row(dl, 'Expiry', q.posts.expiry);
+        row(dl, 'Rate', q.rate);
+        row(dl, 'Cost per post', q.posts.per_post);
+        row(dl, 'Reserved now (maximum)', q.posts.reserve);
+        if (q.charge_base && q.charge_base !== q.charge) row(dl, 'Charged in account currency', q.charge_base);
+      } else {
       row(dl, byId[svcSel.value] && byId[svcSel.value].l ? byId[svcSel.value].l : 'Link', q.link);
       row(dl, q.subscription ? 'Quantity per delivery' : 'Quantity', Number(q.quantity).toLocaleString() + (q.runs ? ' × ' + q.runs + ' runs' : ''));
       Object.keys(q.extra || {}).forEach(function (k) { if (k !== 'comments' && k !== 'usernames') row(dl, k.replace(/_/g, ' '), q.extra[k]); });
@@ -603,6 +660,7 @@
         row(dl, 'Total charge', q.charge);
       }
       if (q.charge_base && q.charge_base !== q.charge) row(dl, 'Charged in account currency', q.charge_base);
+      }
       row(dl, 'Average time', q.service.average_time);
       row(dl, 'Refill / cancel', (q.service.refill ? 'Refill available' : 'No refill') + ' · ' + (q.service.cancel ? 'cancel available' : 'no cancel'));
       var notes = $('#confirm-notes'); notes.innerHTML = '';
@@ -610,7 +668,7 @@
       $('#confirm-insufficient').hidden = !q.insufficient;
       $('#confirm-error').hidden = true;
       confirmBtn.disabled = !!q.insufficient;
-      $('#order-confirm-title').textContent = q.subscription ? 'Confirm your subscription' : 'Confirm your order';
+      $('#order-confirm-title').textContent = q.subscription || q.posts ? 'Confirm your subscription' : 'Confirm your order';
       $('#confirm-review').hidden = false; $('#confirm-done').hidden = true;
       if (dialog.showModal && !dialog.open) dialog.showModal(); else dialog.setAttribute('open', '');
       confirmBtn.focus();

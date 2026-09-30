@@ -162,7 +162,7 @@ final class ProviderSyncService
         return $p['connection_status'] === 'error' ? 'error' : 'ok';
     }
 
-    /** Provider-native "Subscriptions" (username/posts/expiry, billed per post) cannot be charged by this panel. */
+    /** Provider-native "Subscriptions" (username/posts/delay/expiry): imported as post-based subscription services. */
     public static function isProviderSubscriptionType(string $providerType): bool
     {
         return in_array(strtolower(preg_replace('/[\s_\-]+/', '', $providerType)), ['subscriptions', 'subscription'], true);
@@ -210,50 +210,68 @@ final class ProviderSyncService
     }
 
     /**
-     * Update linked services with auto_sync enabled: provider rate × exchange rate × (1 + markup%),
-     * min/max, and disable services the provider no longer offers.
+     * Refresh every linked service from the last fetched provider catalog:
+     *  - all services: the provider cost (provider rate × exchange rate) is
+     *    updated and price protection is applied (PriceProtection::evaluate);
+     *  - auto_sync services: price = cost × (1 + markup%), min/max follow the
+     *    provider, and services the provider no longer offers are disabled.
+     * Manual selling prices are only changed when the protection mode is "auto".
+     * Services whose catalog entry is missing are left alone (a failed fetch
+     * never changes prices).
      */
     public static function syncServicePrices(?int $providerId = null): array
     {
         $db = Database::instance();
+        PriceProtection::reset();
         $sql = "SELECT s.*, ps.rate AS p_rate, ps.min_quantity AS p_min, ps.max_quantity AS p_max, ps.is_available AS p_avail, p.exchange_rate
                 FROM services s
                 JOIN providers p ON p.id = s.provider_id
                 LEFT JOIN provider_services ps ON ps.provider_id = s.provider_id AND ps.provider_service_id = s.provider_service_id
-                WHERE s.auto_sync = 1" . ($providerId ? ' AND s.provider_id = ' . (int) $providerId : '');
+                WHERE s.provider_service_id IS NOT NULL" . ($providerId ? ' AND s.provider_id = ' . (int) $providerId : '');
         $updated = 0;
         $disabled = 0;
+        $protection = [];
         foreach ($db->fetchAll($sql) as $s) {
+            $auto = (int) $s['auto_sync'] === 1;
             if ($s['p_rate'] === null || (int) $s['p_avail'] === 0) {
-                if ($s['status'] === 'active') {
+                if ($auto && $s['status'] === 'active') {
                     $db->update('services', ['status' => 'disabled', 'updated_at' => now()], ['id' => $s['id']]);
                     $disabled++;
                 }
                 continue;
             }
             $cost = Money::mul((string) $s['p_rate'], (string) $s['exchange_rate']);
-            $markup = (string) ($s['markup_percent'] ?? '0');
-            $rate = Money::add($cost, Money::percent($cost, $markup));
+            $oldCost = $s['provider_rate'] !== null ? Money::of((string) $s['provider_rate']) : null;
             $changes = [];
-            if (Money::cmp($rate, (string) $s['rate']) !== 0) {
-                $changes['rate'] = $rate;
-            }
-            if (Money::cmp($cost, (string) ($s['provider_rate'] ?? '0')) !== 0) {
+            if ($oldCost === null || Money::cmp($cost, $oldCost) !== 0) {
                 $changes['provider_rate'] = $cost;
             }
-            if ((int) $s['p_min'] !== (int) $s['min_quantity']) {
-                $changes['min_quantity'] = (int) $s['p_min'];
-            }
-            if ((int) $s['p_max'] !== (int) $s['max_quantity']) {
-                $changes['max_quantity'] = (int) $s['p_max'];
+            if ($auto) {
+                $rate = Money::add($cost, Money::percent($cost, (string) ($s['markup_percent'] ?? '0')));
+                if (Money::cmp($rate, (string) $s['rate']) !== 0) {
+                    $changes['rate'] = $rate;
+                    $s['rate'] = $rate;
+                }
+                if ((int) $s['p_min'] !== (int) $s['min_quantity']) {
+                    $changes['min_quantity'] = (int) $s['p_min'];
+                }
+                if ((int) $s['p_max'] !== (int) $s['max_quantity']) {
+                    $changes['max_quantity'] = (int) $s['p_max'];
+                }
             }
             if ($changes) {
                 $changes['updated_at'] = now();
                 $db->update('services', $changes, ['id' => $s['id']]);
                 $updated++;
             }
+            if ($oldCost !== null || (int) $s['price_blocked'] === 1 || (int) $s['price_disabled'] === 1 || Money::cmp((string) $s['rate'], PriceProtection::safeRate($cost)) < 0) {
+                $action = PriceProtection::evaluate($s, $oldCost, $cost, 'provider sync');
+                if ($action) {
+                    $protection[$action] = ($protection[$action] ?? 0) + 1;
+                }
+            }
         }
-        return ['updated' => $updated, 'disabled' => $disabled];
+        return ['updated' => $updated, 'disabled' => $disabled, 'protection' => $protection];
     }
 
     /**
@@ -277,10 +295,6 @@ final class ProviderSyncService
             if (!$ps) {
                 continue;
             }
-            if (self::isProviderSubscriptionType((string) $ps['type'])) {
-                $skipped++;
-                continue;
-            }
             $cat = $categoryId;
             if ($createCategories || !$cat) {
                 $name = mb_substr($ps['category'] ?: 'Imported', 0, 150);
@@ -295,7 +309,8 @@ final class ProviderSyncService
             }
             $cost = Money::mul((string) $ps['rate'], (string) $provider['exchange_rate']);
             $rate = Money::add($cost, Money::percent($cost, $markupPercent));
-            $type = self::mapType((string) $ps['type']);
+            $postsSub = self::isProviderSubscriptionType((string) $ps['type']);
+            $type = $postsSub ? 'subscription' : self::mapType((string) $ps['type']);
             $exists = $db->fetchColumn('SELECT id FROM services WHERE provider_id = ? AND provider_service_id = ?', [$providerId, (string) $psid]);
             $data = [
                 'category_id' => $cat,
@@ -315,6 +330,13 @@ final class ProviderSyncService
                 'cancel' => (int) $ps['cancel'],
                 'updated_at' => now(),
             ];
+            if ($postsSub) {
+                // Provider-side subscription: username + new/old posts + min/max + delay + expiry, reserved and reconciled per post.
+                $data += ['subscription_enabled' => 1, 'subscription_mode' => 'posts'];
+                if (!$exists) {
+                    $data += ['link_label' => 'Username', 'custom_fields' => json_encode(['link_type' => 'username'])];
+                }
+            }
             if ($exists) {
                 $db->update('services', $data, ['id' => (int) $exists]);
             } else {

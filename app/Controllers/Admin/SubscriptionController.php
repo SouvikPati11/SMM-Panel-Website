@@ -81,14 +81,25 @@ final class SubscriptionController extends Controller
             $r === 'skipped' ? $this->error('Nothing to run: the subscription is not active, finished, or already being processed.') : $this->success('Next delivery: ' . $r . '.');
             return Response::redirect(admin_url('subscriptions/' . $id));
         }
-        if (!in_array($action, ['pause', 'resume', 'cancel'], true)) {
+        if ($action === 'record') {
+            // Manual post subscriptions: the admin records how many posts were delivered.
+            SubscriptionService::recordPosts($id, $request->int('posts_done'), $adminId);
+            AuditService::log('subscription.record_posts', 'subscription', $id, ['posts' => $request->int('posts_done')]);
+            if ($request->bool('finish')) {
+                SubscriptionService::reconcile($id, 'completed', 'admin:' . $adminId, 'Completed by admin' . ($reason !== '' ? ': ' . $reason : ''));
+            }
+            $this->success('Subscription #' . $id . ' updated.');
+            return Response::redirect(admin_url('subscriptions/' . $id));
+        }
+        if (!in_array($action, ['pause', 'resume', 'cancel', 'force_cancel'], true)) {
             throw new ValidationException('Unknown action.');
         }
         if ($reason === '') {
             throw new ValidationException('Enter a reason (kept in the subscription history and audit log).');
         }
         $before = SubscriptionService::find($id);
-        $sub = SubscriptionService::changeStatus($id, $action, 'admin:' . $adminId, null, 'Admin: ' . $reason);
+        $force = $action === 'force_cancel';
+        $sub = SubscriptionService::changeStatus($id, $force ? 'cancel' : $action, 'admin:' . $adminId, null, 'Admin: ' . $reason, $force);
         AuditService::log('subscription.' . $action, 'subscription', $id, ['from' => $before['status'] ?? null, 'to' => $sub['status'], 'reason' => $reason]);
         $this->success('Subscription #' . $id . ' is now ' . $sub['status'] . '.');
         return Response::redirect(admin_url('subscriptions/' . $id));

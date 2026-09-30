@@ -56,6 +56,7 @@ final class App
     {
         self::$request = $request;
         \App\Services\CurrencyService::reset(); // display currency is resolved per request
+        \App\Services\PriceProtection::reset();
         Cookie::reset();
 
         // Before installation, everything goes to the installer.

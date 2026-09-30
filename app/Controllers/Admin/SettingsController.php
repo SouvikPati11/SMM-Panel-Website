@@ -42,6 +42,7 @@ final class SettingsController extends Controller
             'min_order_amount' => 'decimal|min:0', 'mass_order_enabled' => 'boolean', 'mass_order_max_lines' => 'required|integer|min:1|max:500',
             'order_cancel_enabled' => 'boolean', 'refill_enabled' => 'boolean', 'order_sync_batch' => 'required|integer|min:10|max:1000',
             'subscriptions_enabled' => 'boolean', 'subscription_max_cycles' => 'required|integer|min:2|max:1000',
+            'price_protection_mode' => 'required|in:protect,auto,disable,off', 'price_protection_margin' => 'required|decimal|min:0|max:1000',
         ],
         'funds' => [
             // Deposit limits are set per gateway (Admin → Payment gateways) since 2026_10_12.
@@ -127,7 +128,12 @@ final class SettingsController extends Controller
         }
         SettingsService::setMany($input);
         AuditService::log('settings.' . $tab, 'settings', $tab, $changed);
-        $this->success('Settings saved.');
+        $extra = '';
+        if ($tab === 'orders' && (isset($changed['price_protection_mode']) || isset($changed['price_protection_margin']))) {
+            $r = \App\Services\ProviderSyncService::syncServicePrices(); // apply the new rule to every linked service now
+            $extra = $r['protection'] ? ' Price protection re-checked: ' . implode(', ', array_map(static fn ($k, $n) => "{$n} {$k}", array_keys($r['protection']), $r['protection'])) . '.' : ' Price protection re-checked: no service needed a change.';
+        }
+        $this->success('Settings saved.' . $extra);
         return Response::redirect(admin_url('settings?tab=' . $tab));
     }
 

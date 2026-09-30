@@ -806,3 +806,12 @@ ul.hero-trust, ol.steps, .platform-grid { list-style: none; padding: 0; margin-l
 .alert code { word-break: break-all; }
 .balance-chip-label { font-weight: 600; color: var(--text-2); }
 .provider-card .card-header { flex-wrap: nowrap; align-items: flex-start; }
+/* ---- post-based subscription form (order page) ---- */
+.sub-posts { border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); padding: 16px 16px 4px; margin: 0 0 16px; min-width: 0; }
+.sub-posts[hidden] { display: none; }
+.sub-posts-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14.5px; padding: 0 6px; margin-left: -6px; color: var(--text); }
+.sub-posts .input, .sub-posts .select { background: var(--surface); }
+.minmax { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 10px; }
+.minmax-label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.minmax-sep { padding-bottom: 12px; color: var(--muted); font-weight: 700; }
+@media (max-width: 480px) { .sub-posts { padding: 14px 12px 2px; } }

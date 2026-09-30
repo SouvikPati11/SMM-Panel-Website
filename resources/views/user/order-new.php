@@ -73,7 +73,7 @@ foreach (array_merge($platforms, [Platforms::OTHER]) as $p) {
         </div>
       </div>
 
-      <div class="field">
+      <div class="field" id="field-link">
         <label for="link" id="link-label">Link</label>
         <input class="input" id="link" name="link" required maxlength="1000" autocomplete="off" inputmode="url" value="<?= e(old('link')) ?>">
       </div>
@@ -121,6 +121,32 @@ foreach (array_merge($platforms, [Platforms::OTHER]) as $p) {
         </div>
         <p class="hint" style="margin-top:-6px">The same order is placed automatically on each schedule. The first delivery is charged now; each later one is charged from your balance when it is placed. Pause or cancel at any time.</p>
       </div>
+
+      <fieldset class="sub-posts" id="field-subscription-posts" hidden disabled>
+        <legend class="sub-posts-title"><?= icon('refresh') ?> Subscription details</legend>
+        <div class="field">
+          <label for="sub_username">Username</label>
+          <div class="input-icon"><span class="input-icon-glyph"><?= icon('user') ?></span><input class="input" id="sub_username" name="sub_username" maxlength="200" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="username or profile link" required></div>
+          <div class="hint">New posts on this account are delivered to automatically.</div>
+        </div>
+        <div class="form-grid">
+          <div class="field"><label for="sub_posts">New posts</label><input class="input" id="sub_posts" name="sub_posts" type="number" inputmode="numeric" min="1" step="1" value="1" required><div class="hint" id="sub-posts-hint"></div></div>
+          <div class="field" id="field-old-posts"><label for="sub_old_posts">Old posts</label><input class="input" id="sub_old_posts" name="sub_old_posts" type="number" inputmode="numeric" min="0" step="1" value="0"><div class="hint" id="sub-old-hint"></div></div>
+        </div>
+        <div class="field">
+          <div class="label" id="sub-qty-label">Quantity per post</div>
+          <div class="minmax" role="group" aria-labelledby="sub-qty-label">
+            <div><label class="minmax-label" for="sub_min">Min</label><input class="input" id="sub_min" name="sub_min" type="number" inputmode="numeric" min="1" step="1" required></div>
+            <span class="minmax-sep" aria-hidden="true">–</span>
+            <div><label class="minmax-label" for="sub_max">Max</label><input class="input" id="sub_max" name="sub_max" type="number" inputmode="numeric" min="1" step="1" required></div>
+          </div>
+          <div class="hint" id="sub-qty-hint"></div>
+        </div>
+        <div class="form-grid">
+          <div class="field"><label for="sub_delay">Delay</label><select class="select" id="sub_delay" name="sub_delay"><?php foreach (\App\Services\SubscriptionService::DELAYS as $m => $label): ?><option value="<?= (int) $m ?>"><?= e($label) ?></option><?php endforeach ?></select><div class="hint">Wait before each new post is delivered.</div></div>
+          <div class="field"><label for="sub_expiry">Expiry</label><input class="input" id="sub_expiry" name="sub_expiry" type="date"><div class="hint" id="sub-expiry-hint">Optional. The subscription stops on this date.</div></div>
+        </div>
+      </fieldset>
 
       <div class="charge-box" aria-live="polite">
         <div><div class="text-sm text-muted" id="charge-label">Estimated charge</div><div class="amount"><span id="charge-amount"><?= e(money('0')) ?></span><span class="spinner" id="charge-spinner" hidden aria-label="Updating price"></span></div><div class="text-xs text-muted" id="charge-note"></div></div>

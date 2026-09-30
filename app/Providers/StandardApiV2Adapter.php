@@ -33,8 +33,15 @@ use App\Core\Money;
  *     "multi_status_param": "orders",
  *     "multi_status_max": 100,
  *     "cancel_param": "orders",           // "orders" (multi) or "order"
- *     "extra": {}                          // static params appended to every request
+ *     "extra": {},                         // static params appended to every request
+ *     "key_in": "param",                  // "param" (standard), "bearer" (Authorization: Bearer <key>)
+ *                                         // or "header" (sent in the header named by key_header)
+ *     "key_header": "X-Api-Key",
+ *     "user_agent": ""                    // override the User-Agent some firewalls filter on
  *   }
+ *
+ * Responses are parsed tolerantly (see ResponseParser): string/number balances
+ * with separators or currency symbols, wrapped payloads, BOM/notice noise.
  *
  * No endpoints are invented: the adapter only calls the URL the admin enters.
  */
@@ -60,6 +67,9 @@ final class StandardApiV2Adapter implements ProviderAdapterInterface
         'multi_status_max' => 100,
         'cancel_param' => 'orders',
         'extra' => [],
+        'key_in' => 'param',
+        'key_header' => 'X-Api-Key',
+        'user_agent' => '',
     ];
 
     public function __construct(
@@ -183,43 +193,31 @@ final class StandardApiV2Adapter implements ProviderAdapterInterface
     public function services(): array
     {
         $data = $this->call('services', [], timeout: max($this->timeout, 60));
-        if (!array_is_list($data)) {
-            throw new ProviderException('Unexpected services response format', ProviderException::KIND_UNKNOWN);
+        $list = ResponseParser::serviceList($data);
+        if ($list === null) {
+            throw new ProviderException('Unexpected services response: expected a JSON list of services but received ' . ResponseParser::describe($data, (string) json_encode($data), [$this->apiKey]), ProviderException::KIND_UNKNOWN);
         }
         $out = [];
-        foreach ($data as $s) {
-            if (!is_array($s) || !isset($s['service'], $s['name'], $s['rate'])) {
-                continue;
+        foreach ($list as $row) {
+            if (is_array($row) && ($svc = ResponseParser::service($row)) !== null) {
+                $out[] = $svc;
             }
-            $rate = str_replace(',', '', (string) $s['rate']);
-            if (!Money::isNumeric($rate)) {
-                continue;
-            }
-            $out[] = [
-                'service' => (string) $s['service'],
-                'name' => mb_substr((string) $s['name'], 0, 255),
-                'category' => mb_substr((string) ($s['category'] ?? 'Uncategorized'), 0, 255),
-                'type' => mb_substr((string) ($s['type'] ?? 'Default'), 0, 60),
-                'rate' => Money::of($rate),
-                'min' => max(1, (int) ($s['min'] ?? 1)),
-                'max' => max(1, (int) ($s['max'] ?? 1)),
-                'refill' => filter_var($s['refill'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                'cancel' => filter_var($s['cancel'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                'dripfeed' => filter_var($s['dripfeed'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                'description' => (string) ($s['description'] ?? $s['desc'] ?? ''),
-            ];
+        }
+        if ($list && !$out) {
+            throw new ProviderException('Unexpected services response: none of the ' . count($list) . ' items has the API v2 fields service, name and rate. Received ' . ResponseParser::describe($list, (string) json_encode(array_slice($list, 0, 1)), [$this->apiKey]), ProviderException::KIND_UNKNOWN);
         }
         return $out;
     }
 
     public function balance(): array
     {
-        $data = $this->call('balance', []);
-        $bal = str_replace(',', '', (string) ($data['balance'] ?? ''));
-        if (!Money::isNumeric($bal)) {
-            throw new ProviderException('Unexpected balance response', ProviderException::KIND_UNKNOWN);
+        $data = $this->call('balance', [], allowScalar: true);
+        $parsed = ResponseParser::balance($data);
+        if ($parsed === null) {
+            // Explain what arrived (keys + short redacted preview) — the full body is in Providers → API logs.
+            throw new ProviderException('Unexpected balance response: no numeric "balance" field. Received ' . ResponseParser::describe($data, (string) json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), [$this->apiKey]), ProviderException::KIND_UNKNOWN);
         }
-        return ['balance' => Money::of($bal), 'currency' => strtoupper((string) ($data['currency'] ?? 'USD'))];
+        return ['balance' => Money::of($parsed['balance']), 'currency' => $parsed['currency'] ?? 'USD'];
     }
 
     // ------------------------------------------------------------------
@@ -242,16 +240,24 @@ final class StandardApiV2Adapter implements ProviderAdapterInterface
      * Perform one API call. Idempotent reads may be retried once on a network
      * failure that happened before sending; state-changing calls never retry.
      */
-    private function call(string $action, array $params, bool $retrySafe = true, ?int $timeout = null): array
+    private function call(string $action, array $params, bool $retrySafe = true, ?int $timeout = null, bool $allowScalar = false): mixed
     {
         $payload = array_merge($this->cfg['extra'] ?: [], $params, [
-            $this->cfg['key_param'] => $this->apiKey,
             $this->cfg['action_param'] => $this->cfg['actions'][$action] ?? $action,
         ]);
+        $headers = [];
+        match ($this->cfg['key_in']) {
+            'bearer' => $headers['Authorization'] = 'Bearer ' . $this->apiKey,
+            'header' => $headers[(string) $this->cfg['key_header']] = $this->apiKey,
+            default => $payload[$this->cfg['key_param']] = $this->apiKey,
+        };
+        if (trim((string) $this->cfg['user_agent']) !== '') {
+            $headers['User-Agent'] = mb_substr(trim((string) $this->cfg['user_agent']), 0, 200);
+        }
         $attempts = $retrySafe ? 2 : 1;
         $resp = null;
         for ($i = 1; $i <= $attempts; $i++) {
-            $opts = ['timeout' => $timeout ?? $this->timeout, 'connect_timeout' => 10];
+            $opts = ['timeout' => $timeout ?? $this->timeout, 'connect_timeout' => 10, 'headers' => $headers];
             if (strtoupper($this->cfg['method']) === 'GET') {
                 $opts['query'] = $payload;
                 $resp = HttpClient::get($this->apiUrl, $opts);
@@ -263,30 +269,39 @@ final class StandardApiV2Adapter implements ProviderAdapterInterface
                 break;
             }
         }
-        return $this->interpret($action, $params, $resp);
+        return $this->interpret($action, $params, $resp, $allowScalar);
     }
 
-    private function interpret(string $action, array $params, HttpResponse $resp): array
+    private function interpret(string $action, array $params, HttpResponse $resp, bool $allowScalar = false): mixed
     {
         $error = null;
         $kind = null;
         $data = null;
+        $secrets = [$this->apiKey];
 
         if ($resp->isNetworkError()) {
-            $error = 'Network error: ' . $resp->error;
+            $error = 'Network error: ' . ResponseParser::redact((string) $resp->error, $secrets);
             $kind = $resp->notSent ? ProviderException::KIND_UNREACHABLE : ProviderException::KIND_UNKNOWN;
         } else {
-            $data = $resp->json();
+            $data = ResponseParser::decode($resp->body);
+            $failure = is_array($data) && !array_is_list($data) ? ResponseParser::failureMessage($data) : null;
             if ($resp->status === 429) {
                 $error = 'Provider rate limit reached (HTTP 429)';
                 $kind = ProviderException::KIND_UNREACHABLE; // 429 means the request was refused, not executed
-            } elseif ($data === null) {
-                $error = 'Invalid (non-JSON) response, HTTP ' . $resp->status;
+            } elseif ($resp->status >= 300 && $resp->status < 400) {
+                $to = ResponseParser::redact((string) $resp->header('location'), $secrets);
+                $error = "The API URL redirects (HTTP {$resp->status})" . ($to !== '' ? " to {$to}" : '') . '. Enter the final URL (check https:// and the exact path, e.g. /api/v2) in the provider settings.';
+                $kind = ProviderException::KIND_REJECTED; // redirects are not followed, so nothing was executed
+            } elseif ($failure !== null) {
+                $error = 'Provider error: ' . mb_substr(ResponseParser::redact($failure, $secrets), 0, 300);
+                $kind = ProviderException::KIND_REJECTED;
+            } elseif ($data === null || (!is_array($data) && !$allowScalar)) {
+                $isHtml = (bool) preg_match('/^\s*(<!doctype|<html|<head|<body)/i', $resp->body) || str_contains(strtolower((string) $resp->header('content-type')), 'text/html');
+                $error = $isHtml
+                    ? "The provider returned an HTML page instead of JSON (HTTP {$resp->status}). The API URL is probably wrong (it usually ends in /api/v2), or a firewall/Cloudflare is blocking server requests: ask the provider to allow your server's IP."
+                    : "Invalid (non-JSON) response, HTTP {$resp->status}" . ($resp->body === '' ? ' with an empty body' : ': "' . ResponseParser::preview($resp->body, $secrets, 120) . '"');
                 // 5xx/garbage after sending: we cannot know whether an "add" executed
                 $kind = ProviderException::KIND_UNKNOWN;
-            } elseif (!array_is_list($data) && isset($data['error'])) {
-                $error = 'Provider error: ' . mb_substr(is_scalar($data['error']) ? (string) $data['error'] : json_encode($data['error']), 0, 300);
-                $kind = ProviderException::KIND_REJECTED;
             } elseif ($resp->status >= 400) {
                 $error = 'HTTP ' . $resp->status;
                 $kind = $resp->status >= 500 ? ProviderException::KIND_UNKNOWN : ProviderException::KIND_REJECTED;
@@ -310,7 +325,7 @@ final class StandardApiV2Adapter implements ProviderAdapterInterface
                 'http_status' => $resp->status ?: null,
                 'success' => $ok ? 1 : 0,
                 'request' => json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-                'response' => mb_substr($resp->body, 0, $action === 'services' ? 2000 : 20000),
+                'response' => mb_substr(ResponseParser::redact($resp->body, [$this->apiKey]), 0, $action === 'services' ? 2000 : 20000),
                 'error' => $error ? mb_substr($error, 0, 500) : null,
                 'duration_ms' => $resp->durationMs,
                 'created_at' => now(),

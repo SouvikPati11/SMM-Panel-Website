@@ -48,25 +48,56 @@ final class SubscriptionService
     }
 
     /**
+     * Subscription rules for one service: whether it can be ordered as a
+     * subscription at all, whether it can ONLY be ordered that way (service type
+     * "Subscriptions"), the allowed intervals and the delivery-count range.
+     * @return array{allowed:bool, only:bool, intervals:array<int,string>, min:int, max:int}
+     */
+    public static function options(array $service): array
+    {
+        $only = ($service['type'] ?? '') === 'subscription';
+        $allowed = self::enabled() && ($only || (int) ($service['subscription_enabled'] ?? 0) === 1);
+        $intervals = self::INTERVALS;
+        $csv = trim((string) ($service['subscription_intervals'] ?? ''));
+        if ($csv !== '') {
+            $pick = array_flip(array_map('intval', explode(',', $csv)));
+            $intervals = array_intersect_key(self::INTERVALS, $pick) ?: self::INTERVALS;
+        }
+        $max = self::maxCycles();
+        if (!empty($service['subscription_max_cycles'])) {
+            $max = max(2, min($max, (int) $service['subscription_max_cycles']));
+        }
+        $min = !empty($service['subscription_min_cycles']) ? max(2, min($max, (int) $service['subscription_min_cycles'])) : 2;
+        return ['allowed' => $allowed, 'only' => $only, 'intervals' => $intervals, 'min' => $min, 'max' => $max];
+    }
+
+    /** Validate interval + number of deliveries against the service's rules. */
+    public static function assertSchedule(array $service, int $intervalHours, int $cycles): void
+    {
+        $o = self::options($service);
+        if (!self::enabled()) {
+            throw new ValidationException('Auto-subscriptions are currently disabled.');
+        }
+        if (!$o['allowed']) {
+            throw new ValidationException('This service does not support auto-subscriptions.');
+        }
+        if (!isset($o['intervals'][$intervalHours])) {
+            throw new ValidationException('Choose how often the order should repeat (' . strtolower(implode(', ', $o['intervals'])) . ').');
+        }
+        if ($cycles < $o['min'] || $cycles > $o['max']) {
+            throw new ValidationException("Number of deliveries must be between {$o['min']} and {$o['max']}.");
+        }
+    }
+
+    /**
      * Create a subscription and place its first order in one transaction: if the
      * first cycle cannot be charged (e.g. insufficient balance) nothing is created.
      */
     public static function create(int $userId, int $serviceId, array $input, int $intervalHours, int $cycles, ?string $idempotencyKey = null): array
     {
-        if (!self::enabled()) {
-            throw new ValidationException('Auto-subscriptions are currently disabled.');
-        }
         $db = Database::instance();
         $service = OrderService::orderableService($serviceId);
-        if ((int) $service['subscription_enabled'] !== 1) {
-            throw new ValidationException('This service does not support auto-subscriptions.');
-        }
-        if (!isset(self::INTERVALS[$intervalHours])) {
-            throw new ValidationException('Choose how often the order should repeat.');
-        }
-        if ($cycles < 2 || $cycles > self::maxCycles()) {
-            throw new ValidationException('Number of deliveries must be between 2 and ' . self::maxCycles() . '.');
-        }
+        self::assertSchedule($service, $intervalHours, $cycles);
         unset($input['dripfeed'], $input['runs'], $input['interval']); // drip-feed and subscriptions do not mix
         $params = OrderService::validateInput($service, $input);
 

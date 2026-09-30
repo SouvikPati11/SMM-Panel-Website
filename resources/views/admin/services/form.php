@@ -8,7 +8,7 @@
       <?= Form::input('name', 'Name', $s['name'] ?? '', ['required' => true, 'maxlength' => 255]) ?>
       <div class="form-grid">
         <?= Form::select('category_id', 'Category', $categories, (string) ($s['category_id'] ?? ''), ['required' => true]) ?>
-        <?= Form::select('type', 'Service type', $types, $s['type'] ?? 'default', ['hint' => 'Controls which fields the order form shows.']) ?>
+        <?= Form::select('type', 'Service type', $types, $s['type'] ?? 'default', ['hint' => 'Controls which fields the order form shows. <strong>Subscriptions</strong> = repeated deliveries on a schedule.', 'attrs' => ['data-service-type' => '']]) ?>
       </div>
       <?= Form::textarea('description', 'Description (shown on the order form)', $s['description'] ?? '', ['rows' => 6, 'hint' => 'Plain text. Mention start time, speed, quality, requirements.']) ?>
       <div class="form-grid">
@@ -39,12 +39,24 @@
         <?= Form::input('max_quantity', 'Max quantity', $s['max_quantity'] ?? 100000, ['type' => 'number', 'min' => 1, 'required' => true]) ?>
       </div>
     </div></div>
+    <?php $subOn = ($s['type'] ?? '') === 'subscription' || (int) ($s['subscription_enabled'] ?? 0) === 1;
+    $picked = array_filter(array_map('intval', explode(',', (string) ($s['subscription_intervals'] ?? '')))); ?>
+    <div class="card mb-2" id="sub-settings" <?= $subOn ? '' : 'hidden' ?>><div class="card-header"><h2><?= icon('refresh') ?> Subscription settings</h2></div><div class="card-body">
+      <p class="hint mt-0">Each delivery is a normal order for the link and quantity the user chose, placed by cron on this schedule and sent to the provider like any other order. Provider-side "Subscriptions" (username/posts/expiry, billed per post) are not used.</p>
+      <div class="field"><div class="label">Allowed intervals</div><div class="check-grid">
+        <?php foreach ($intervals as $h => $label): ?><?= Form::check('subscription_intervals[]', e($label), !$picked || in_array($h, $picked, true), (string) $h) ?><?php endforeach ?>
+      </div><div class="hint">All ticked = every interval.</div></div>
+      <div class="form-grid">
+        <?= Form::input('subscription_min_cycles', 'Minimum deliveries', $s['subscription_min_cycles'] ?? '', ['type' => 'number', 'min' => 2, 'max' => 1000, 'placeholder' => '2']) ?>
+        <?= Form::input('subscription_max_cycles', 'Maximum deliveries', $s['subscription_max_cycles'] ?? '', ['type' => 'number', 'min' => 2, 'max' => 1000, 'placeholder' => (string) $maxCycles, 'hint' => 'Capped by Settings → Orders (' . (int) $maxCycles . ').']) ?>
+      </div>
+    </div></div>
     <div class="card mb-2"><div class="card-header"><h2>Options</h2></div><div class="card-body">
       <?= Form::toggle('refill', 'Refill available', (int) ($s['refill'] ?? 0) === 1) ?>
       <?= Form::input('refill_days', 'Refill period (days)', $s['refill_days'] ?? 30, ['type' => 'number', 'min' => 0]) ?>
       <?= Form::toggle('cancel', 'Cancel available', (int) ($s['cancel'] ?? 0) === 1) ?>
       <?= Form::toggle('dripfeed', 'Drip-feed available', (int) ($s['dripfeed'] ?? 0) === 1) ?>
-      <?= Form::toggle('subscription_enabled', 'Allow auto-subscriptions', (int) ($s['subscription_enabled'] ?? 0) === 1, 'Users can repeat this order automatically (every hour … every week, 2–' . (int) setting('subscription_max_cycles', '100') . ' deliveries). Each delivery is a normal order, charged when placed.') ?>
+      <div data-sub-toggle><?= Form::toggle('subscription_enabled', 'Also allow auto-subscriptions', (int) ($s['subscription_enabled'] ?? 0) === 1, 'Users can choose one-time or repeated delivery. Services of type <strong>Subscriptions</strong> are always sold as subscriptions.') ?></div>
       <hr>
       <?= Form::select('status', 'Status', ['active' => 'Active', 'disabled' => 'Disabled'], $s['status'] ?? 'active') ?>
       <?= Form::toggle('is_hidden', 'Hidden from users (API & catalog)', (int) ($s['is_hidden'] ?? 0) === 1) ?>

@@ -69,6 +69,14 @@ final class HttpClient
         if ($body !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
         }
+        $respHeaders = [];
+        curl_setopt($ch, CURLOPT_HEADERFUNCTION, static function ($ch, string $line) use (&$respHeaders): int {
+            if (str_contains($line, ':')) {
+                [$k, $v] = explode(':', $line, 2);
+                $respHeaders[strtolower(trim($k))] = trim($v);
+            }
+            return strlen($line);
+        });
 
         $start = microtime(true);
         $raw = curl_exec($ch);
@@ -86,7 +94,7 @@ final class HttpClient
             ], true) || (defined('CURLE_PEER_FAILED_VERIFICATION') && $errno === CURLE_PEER_FAILED_VERIFICATION);
             return new HttpResponse(0, '', $ms, $error ?: 'Network error', $preSend);
         }
-        return new HttpResponse($status, (string) $raw, $ms);
+        return new HttpResponse($status, (string) $raw, $ms, null, false, $respHeaders);
     }
 
     public static function post(string $url, array $opts = []): HttpResponse

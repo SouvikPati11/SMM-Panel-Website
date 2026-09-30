@@ -69,7 +69,7 @@ final class PageController extends Controller
             $params[] = $cat;
         }
         $rows = $db->fetchAll(
-            "SELECT s.id, s.name, s.rate, s.min_quantity, s.max_quantity, s.type, s.refill, s.cancel, s.dripfeed, s.average_time, c.id AS cat_id, c.name AS cat_name
+            "SELECT s.id, s.name, s.rate, s.min_quantity, s.max_quantity, s.type, s.refill, s.cancel, s.dripfeed, s.subscription_enabled, s.average_time, c.id AS cat_id, c.name AS cat_name
              FROM services s JOIN categories c ON c.id = s.category_id WHERE {$where} ORDER BY c.sort_order, c.name, s.sort_order, s.id LIMIT 3000",
             $params
         );

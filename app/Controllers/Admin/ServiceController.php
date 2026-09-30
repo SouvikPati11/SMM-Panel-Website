@@ -14,6 +14,7 @@ use App\Core\Response;
 use App\Core\Validator;
 use App\Services\AuditService;
 use App\Services\OrderService;
+use App\Services\SubscriptionService;
 
 final class ServiceController extends Controller
 {
@@ -40,6 +41,13 @@ final class ServiceController extends Controller
         } elseif ($status === 'hidden') {
             $where .= ' AND s.is_hidden = 1';
         }
+        $type = $request->str('type');
+        if ($type === 'subscription') {
+            $where .= " AND (s.type = 'subscription' OR s.subscription_enabled = 1)";
+        } elseif ($type !== '' && isset(OrderService::TYPES[$type])) {
+            $where .= ' AND s.type = ?';
+            $params[] = $type;
+        }
         $q = mb_substr($request->str('q'), 0, 100);
         if ($q !== '') {
             $where .= ' AND (s.name LIKE ? OR s.id = ? OR s.provider_service_id = ?)';
@@ -59,7 +67,8 @@ final class ServiceController extends Controller
             'services' => $services,
             'categories' => $db->fetchPairs('SELECT id, name FROM categories ORDER BY sort_order, name'),
             'providers' => $db->fetchPairs('SELECT id, name FROM providers ORDER BY name'),
-            'f' => ['category' => $request->int('category'), 'provider' => $request->str('provider'), 'status' => $status, 'q' => $q],
+            'types' => array_map(static fn ($t) => $t['label'], OrderService::TYPES),
+            'f' => ['category' => $request->int('category'), 'provider' => $request->str('provider'), 'status' => $status, 'q' => $q, 'type' => $type],
         ]);
     }
 
@@ -93,6 +102,8 @@ final class ServiceController extends Controller
             'types' => array_map(static fn ($t) => $t['label'], OrderService::TYPES),
             'custom' => json_decode((string) ($service['custom_fields'] ?? ''), true) ?: [],
             'orders' => $service ? (int) $db->fetchColumn('SELECT COUNT(*) FROM orders WHERE service_id = ?', [$service['id']]) : 0,
+            'intervals' => SubscriptionService::INTERVALS,
+            'maxCycles' => SubscriptionService::maxCycles(),
         ]);
     }
 
@@ -134,6 +145,24 @@ final class ServiceController extends Controller
         }
         $custom = array_filter(['link_type' => $linkType, 'link_regex' => $regex ?: null]);
 
+        // Subscription settings (service type "Subscriptions", or a normal service that also allows them).
+        $isSubType = $data['type'] === 'subscription';
+        $allowSub = $isSubType || $request->bool('subscription_enabled');
+        $intervals = array_values(array_intersect(array_map('intval', (array) ($request->post()['subscription_intervals'] ?? [])), array_keys(SubscriptionService::INTERVALS)));
+        $subMin = $request->str('subscription_min_cycles');
+        $subMax = $request->str('subscription_max_cycles');
+        foreach (['Minimum deliveries' => $subMin, 'Maximum deliveries' => $subMax] as $label => $v) {
+            if ($v !== '' && (!ctype_digit($v) || (int) $v < 2 || (int) $v > 1000)) {
+                throw new ValidationException("{$label} must be a whole number from 2 to 1000 (or empty for the default).");
+            }
+        }
+        if ($subMin !== '' && $subMax !== '' && (int) $subMin > (int) $subMax) {
+            throw new ValidationException('Minimum deliveries cannot be greater than maximum deliveries.');
+        }
+        if ($isSubType && !SubscriptionService::enabled()) {
+            $this->error('Saved, but auto-subscriptions are switched off in Settings → Orders, so users cannot order this service until you enable them.');
+        }
+
         $providerRate = $request->str('provider_rate');
         $row = [
             'category_id' => (int) $data['category_id'],
@@ -151,7 +180,10 @@ final class ServiceController extends Controller
             'max_quantity' => (int) $data['max_quantity'],
             'average_time' => $data['average_time'] ?: null,
             'dripfeed' => $request->bool('dripfeed') ? 1 : 0,
-            'subscription_enabled' => $request->bool('subscription_enabled') ? 1 : 0,
+            'subscription_enabled' => $allowSub ? 1 : 0,
+            'subscription_intervals' => $allowSub && $intervals && count($intervals) < count(SubscriptionService::INTERVALS) ? implode(',', $intervals) : null,
+            'subscription_min_cycles' => $allowSub && $subMin !== '' ? (int) $subMin : null,
+            'subscription_max_cycles' => $allowSub && $subMax !== '' ? (int) $subMax : null,
             'refill' => $request->bool('refill') ? 1 : 0,
             'refill_days' => (int) ($data['refill_days'] ?: 30),
             'cancel' => $request->bool('cancel') ? 1 : 0,

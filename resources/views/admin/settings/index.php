@@ -30,8 +30,21 @@ $s = fn (string $k) => (string) setting($k); $on = fn (string $k) => setting($k)
 <?php elseif ($tab === 'users'): ?>
   <?= Form::toggle('registration_enabled', 'Allow new registrations', $on('registration_enabled')) ?>
   <?= Form::toggle('email_verification', 'Require email verification (configure SMTP first)', $on('email_verification'), 'New accounts must confirm their email (links expire after 48 hours; users can resend). Accounts that existed before you switch this on are not blocked, unless they change their email.' . ($on('email_verification') && $s('email_verification_since') ? ' Enforced for accounts created since ' . e(fmt_date($s('email_verification_since'))) . '.' : '')) ?>
-  <?= Form::toggle('registration_mobile', 'Ask for a mobile number on registration', $on('registration_mobile')) ?>
-  <?= Form::toggle('registration_mobile_required', 'Mobile number is required', $on('registration_mobile_required'), 'Only applies when the field is shown. Numbers are validated (country code, 7–15 digits).') ?>
+  <?= Form::toggle('registration_mobile', 'Mobile number on registration', $on('registration_mobile'), 'ON: the registration form (and Google sign-up) shows a mobile number field, and it is required and validated (country code, 7–15 digits). OFF: the field is not shown, not required and nothing is stored. Existing accounts without a number keep working.') ?>
+  <div class="setting-sub" data-show-if="registration_mobile"><?= Form::toggle('registration_mobile_optional', 'Let users leave the mobile number empty', $on('registration_mobile_optional')) ?></div>
+  <?php if (!\App\Services\MailService::isConfigured()): ?><div class="alert alert-warning"><?= icon('alert') ?><div>Email is not configured yet (<a href="<?= e(admin_url('settings/email')) ?>">Email settings</a>). With verification ON, new users cannot receive their verification link.</div></div><?php endif ?>
+  <h3 class="mt-3">Sign in with Google</h3>
+  <?php $g = \App\Services\GoogleAuthService::config(); ?>
+  <?= Form::toggle('google_login_enabled', 'Show "Continue with Google" on the login and registration pages', $on('google_login_enabled')) ?>
+  <div class="setting-sub" data-show-if="google_login_enabled">
+    <?php if ($g['source'] === 'env'): ?><div class="alert alert-info"><?= icon('info') ?><div>Using <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code> from <code>.env</code>; the fields below are ignored.</div></div><?php endif ?>
+    <div class="form-grid">
+      <?= Form::input('google_client_id', 'Client ID', $s('google_client_id'), ['placeholder' => '1234567890-abc.apps.googleusercontent.com', 'autocomplete' => 'off']) ?>
+      <?= Form::input('google_client_secret', 'Client secret', '', ['type' => 'password', 'autocomplete' => 'new-password', 'placeholder' => (string) setting('google_client_secret') !== '' ? '•••••••• (saved — leave empty to keep)' : 'GOCSPX-…', 'hint' => 'Stored encrypted with your APP_KEY; never shown again.']) ?>
+    </div>
+    <div class="field"><div class="label">Authorized redirect URI (add this exactly in Google Cloud Console)</div><div class="copy-box"><span class="break-words"><?= e($g['redirect_uri']) ?></span><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($g['redirect_uri']) ?>" aria-label="Copy redirect URI"><?= icon('copy') ?></button></div></div>
+    <p class="hint">Google Cloud Console → APIs &amp; Services → Credentials → Create OAuth client ID (Web application). Full steps: <code>docs/google-login.md</code>.</p>
+  </div>
   <div class="form-grid"><?= Form::input('login_max_attempts', 'Failed logins before lockout', $s('login_max_attempts'), ['type' => 'number']) ?><?= Form::input('login_lockout_minutes', 'Lockout minutes', $s('login_lockout_minutes'), ['type' => 'number']) ?></div>
   <?= Form::select('default_price_level', 'Default price level for new users', $levels, $s('default_price_level'), ['empty' => 'None']) ?>
 <?php elseif ($tab === 'orders'): ?>
@@ -44,7 +57,7 @@ $s = fn (string $k) => (string) setting($k); $on = fn (string $k) => setting($k)
   <?= Form::input('subscription_max_cycles', 'Maximum deliveries per subscription', $s('subscription_max_cycles'), ['type' => 'number', 'min' => 2, 'max' => 1000])  ?>
   <?= Form::input('order_sync_batch', 'Orders synced per cron run', $s('order_sync_batch'), ['type' => 'number', 'hint' => 'Lower this on slow shared hosting.']) ?>
 <?php elseif ($tab === 'funds'): ?>
-  <div class="form-grid"><?= Form::input('min_deposit', 'Minimum deposit', $s('min_deposit'), ['type' => 'number', 'step' => '0.01']) ?><?= Form::input('max_deposit', 'Maximum deposit', $s('max_deposit'), ['type' => 'number', 'step' => '0.01']) ?></div>
+  <div class="alert alert-info"><?= icon('info') ?><div>Minimum and maximum deposits are set <strong>per payment gateway</strong>: <a href="<?= e(admin_url('gateways')) ?>">Payment gateways</a> → edit → <em>Minimum deposit</em>. The deposit page and the server both use the selected gateway's limits.</div></div>
   <?= Form::input('payment_expiry_minutes', 'Invoice expiry (minutes)', $s('payment_expiry_minutes'), ['type' => 'number']) ?>
   <p class="hint">Per-method limits and fees are set in <a href="<?= e(admin_url('gateways')) ?>">Payment gateways</a>.</p>
 <?php elseif ($tab === 'referral'): ?>

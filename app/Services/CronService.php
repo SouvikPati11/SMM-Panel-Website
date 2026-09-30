@@ -135,6 +135,7 @@ final class CronService
                     'webhook_logs' => $db->query('DELETE FROM webhook_logs WHERE created_at < ?', [$d(180)])->rowCount(),
                     'password_resets' => $db->query('DELETE FROM password_resets WHERE expires_at < ?', [$d(1)])->rowCount(),
                     'email_verifications' => $db->query('DELETE FROM email_verifications WHERE expires_at < ?', [$d(1)])->rowCount(),
+                    'remember_tokens' => $db->query('DELETE FROM remember_tokens WHERE expires_at < ?', [now()])->rowCount(),
                     'email_queue' => $db->query("DELETE FROM email_queue WHERE status IN ('sent','failed') AND created_at < ?", [$d(30)])->rowCount(),
                     'cron_runs' => $db->query('DELETE FROM cron_runs WHERE started_at < ?', [$d(14)])->rowCount(),
                     'notifications' => $db->query('DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < ?', [$d(180)])->rowCount(),

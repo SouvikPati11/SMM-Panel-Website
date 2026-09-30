@@ -74,7 +74,7 @@ final class GatewayController extends Controller
         $gateway = $existing['gateway'] ?? 'manual';
         $data = Validator::check($request->post(), [
             'name' => 'required|max:100',
-            'min_amount' => 'required|decimal|min:0',
+            'min_amount' => 'required|decimal|min:0.01',
             'max_amount' => 'required|decimal|min:0',
             'fee_percent' => 'decimal|min:0|max:50',
             'sort_order' => 'integer',

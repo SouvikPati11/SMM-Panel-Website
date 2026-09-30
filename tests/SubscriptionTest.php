@@ -243,3 +243,59 @@ T::test('Subscription: HTTP — quote, create via confirm (JSON), user pages sco
     T::eq('paused', SubscriptionService::find($id)['status']);
     T::eq(1, (int) $db->fetchColumn("SELECT COUNT(*) FROM audit_logs WHERE action = 'subscription.pause' AND target_id = ?", [$id]));
 });
+
+T::test('Subscription service type: admin creates it with per-service schedule; it is sold only as a subscription', function () use ($subProvider, $subFake, $due, $orders) {
+    $db = Database::instance();
+    $adminId = (int) $db->fetchColumn('SELECT id FROM admins WHERE is_super = 1 LIMIT 1');
+    login_as_admin($adminId);
+    $cat = (int) $db->fetchColumn('SELECT id FROM categories LIMIT 1');
+    $r = http('POST', '/' . admin_path() . '/services/save', ['_token' => csrf(), 'category_id' => $cat, 'name' => 'Instagram Auto Views [Daily]', 'type' => 'subscription',
+        'description' => 'Views on your newest post, every day.', 'rate' => '1.00', 'min_quantity' => '100', 'max_quantity' => '5000', 'provider_id' => $subProvider, 'provider_service_id' => '777',
+        'subscription_intervals' => ['24', '168'], 'subscription_min_cycles' => '3', 'subscription_max_cycles' => '10', 'status' => 'active', 'link_type' => 'url', 'refill_days' => '30', 'sort_order' => '0']);
+    T::eq(302, $r->status());
+    $svc = $db->fetch("SELECT * FROM services WHERE name = 'Instagram Auto Views [Daily]'");
+    T::eq(['subscription', 1, '24,168', 3, 10, '777'], [$svc['type'], (int) $svc['subscription_enabled'], $svc['subscription_intervals'], (int) $svc['subscription_min_cycles'], (int) $svc['subscription_max_cycles'], $svc['provider_service_id']]);
+    $list = http('GET', '/' . admin_path() . '/services', ['type' => 'subscription'])->body();
+    T::true(str_contains($list, 'Instagram Auto Views [Daily]') && str_contains($list, '> Subscription</span>'), 'list identifies subscription services');
+    T::true(str_contains(http('GET', '/' . admin_path() . '/services/' . $svc['id'] . '/edit')->body(), 'Subscription settings'));
+    // Invalid settings are rejected.
+    http('POST', '/' . admin_path() . '/services/save', ['_token' => csrf(), 'id' => $svc['id'], 'category_id' => $cat, 'name' => 'x', 'type' => 'subscription', 'rate' => '1', 'min_quantity' => '100', 'max_quantity' => '5000', 'subscription_min_cycles' => '9', 'subscription_max_cycles' => '4']);
+    T::true(str_contains(end($_SESSION['_flash'])['message'], 'Minimum deliveries cannot be greater'));
+    unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
+
+    $subFake();
+    $u = Fx::user('50');
+    // Not orderable as a one-time order (web, mass order, API all go through OrderService::place).
+    T::throws(ValidationException::class, fn () => App\Services\OrderService::place((int) $u['id'], (int) $svc['id'], ['link' => 'https://instagram.com/x', 'quantity' => '1000']), 'is a subscription service');
+    // Schedule limited to the service's settings.
+    T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], (int) $svc['id'], ['link' => 'https://instagram.com/x', 'quantity' => '1000'], 1, 5), 'every day, every week');
+    T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], (int) $svc['id'], ['link' => 'https://instagram.com/x', 'quantity' => '1000'], 24, 2), 'between 3 and 10');
+    T::throws(ValidationException::class, fn () => SubscriptionService::create((int) $u['id'], (int) $svc['id'], ['link' => 'https://instagram.com/x', 'quantity' => '1000'], 24, 11), 'between 3 and 10');
+    $sent = [];
+    $subFake(static function (array $form) use (&$sent) { $sent[] = $form; return Fx::json(['order' => 9000 + count($sent)]); });
+    $sub = SubscriptionService::create((int) $u['id'], (int) $svc['id'], ['link' => 'https://instagram.com/x', 'quantity' => '1000'], 168, 3, 'type1');
+    T::eq(1, (int) $sub['completed_cycles']);
+    T::eq('49.000000', Fx::balance((int) $u['id']), '1000 × 1.00/1000 charged for delivery 1');
+    // Each delivery reaches the provider as a standard API v2 "add" (service, link, quantity).
+    T::eq(['add', '777', 'https://instagram.com/x', '1000'], [$sent[0]['action'], $sent[0]['service'], $sent[0]['link'], (string) $sent[0]['quantity']]);
+    T::true(!isset($sent[0]['username']) && !isset($sent[0]['posts']), 'no invented provider-side subscription parameters');
+    // Cron delivers the next cycle.
+    $due((int) $sub['id']);
+    CronService::run('subscriptions', false);
+    T::eq(2, count($orders((int) $sub['id'])));
+    T::eq(2, count($sent));
+    // Order page marks it subscription-only with its own schedule; the API does not list it.
+    login_as_user($u);
+    $html = http('GET', '/order')->body();
+    T::true((bool) preg_match('/"id":' . $svc['id'] . ',[^}]*"so":true,"si":\["24","168"\],"smi":3,"sma":10/', $html), 'catalog data carries subscription-only + schedule');
+    $q = http('POST', '/order/quote', ['_token' => csrf(), 'service' => $svc['id'], 'link' => 'https://instagram.com/x', 'quantity' => '1000'], ['HTTP_ACCEPT' => 'application/json']);
+    T::true(str_contains($q->body(), 'is a subscription service'), 'one-time quote refused');
+    $q = http('POST', '/order/quote', ['_token' => csrf(), 'service' => $svc['id'], 'link' => 'https://instagram.com/x', 'quantity' => '1000', 'order_type' => 'subscription', 'sub_interval' => '24', 'sub_cycles' => '4'], ['HTTP_ACCEPT' => 'application/json']);
+    T::eq(true, json_decode($q->body(), true)['ok'] ?? null, $q->body());
+    App\Services\Auth::logoutUser();
+    $key = App\Services\ApiKeyService::generate((int) $u['id']);
+    $apiList = json_decode(http('POST', '/api/v2', ['key' => $key, 'action' => 'services'], ['REMOTE_ADDR' => '203.0.113.77'])->body(), true);
+    T::true(!in_array((int) $svc['id'], array_column($apiList, 'service'), true), 'not offered via API v2');
+    $add = json_decode(http('POST', '/api/v2', ['key' => $key, 'action' => 'add', 'service' => $svc['id'], 'link' => 'https://instagram.com/x', 'quantity' => '1000'], ['REMOTE_ADDR' => '203.0.113.77'])->body(), true);
+    T::true(str_contains((string) ($add['error'] ?? ''), 'subscription service'), json_encode($add));
+});

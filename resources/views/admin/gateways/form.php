@@ -11,8 +11,8 @@
       <?= Form::input('name', 'Name shown to users', $m['name'] ?? '', ['required' => true]) ?>
       <?= Form::textarea('instructions', 'Instructions', $m['instructions'] ?? '', ['rows' => 5, 'hint' => 'Plain text shown on the Add Funds page.']) ?>
       <div class="form-grid">
-        <?= Form::input('min_amount', 'Minimum', $m['min_amount'] ?? '1', ['type' => 'number', 'step' => '0.01', 'required' => true]) ?>
-        <?= Form::input('max_amount', 'Maximum', $m['max_amount'] ?? '10000', ['type' => 'number', 'step' => '0.01', 'required' => true]) ?>
+        <?= Form::input('min_amount', 'Minimum deposit (' . e(setting('currency_code', 'USD')) . ')', isset($m['min_amount']) ? rtrim(rtrim((string) $m['min_amount'], '0'), '.') : '1', ['type' => 'number', 'step' => '0.01', 'min' => '0.01', 'required' => true, 'hint' => 'Enforced on the server for this gateway only.']) ?>
+        <?= Form::input('max_amount', 'Maximum deposit (' . e(setting('currency_code', 'USD')) . ')', isset($m['max_amount']) ? rtrim(rtrim((string) $m['max_amount'], '0'), '.') : '10000', ['type' => 'number', 'step' => '0.01', 'min' => '0.01', 'required' => true]) ?>
         <?= Form::input('fee_percent', 'Fee % (added on top)', $m['fee_percent'] ?? '0', ['type' => 'number', 'step' => '0.01', 'min' => 0]) ?>
         <?= Form::input('sort_order', 'Sort order', $m['sort_order'] ?? 0, ['type' => 'number']) ?>
       </div>

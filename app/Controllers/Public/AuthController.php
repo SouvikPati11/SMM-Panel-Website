@@ -13,23 +13,33 @@ use App\Core\Session;
 use App\Core\Totp;
 use App\Services\Auth;
 use App\Services\AuthService;
+use App\Services\GoogleAuthService;
 
 final class AuthController extends Controller
 {
     public function loginForm(Request $request): Response
     {
-        return $this->view('auth/login', ['title' => 'Sign in']);
+        return $this->view('auth/login', ['title' => 'Sign in', 'google' => GoogleAuthService::enabled()]);
     }
 
     public function login(Request $request): Response
     {
         $user = AuthService::attempt('user', $request->str('login'), (string) $request->input('password', ''), $request->ip(), $request->userAgent());
+        return $this->finishLogin($user, $request, $request->bool('remember'));
+    }
+
+    /** Shared by password and Google sign-in: 2FA step if enabled, then the intended page. */
+    private function finishLogin(array $user, Request $request, bool $remember): Response
+    {
         if (AuthService::twoFactorSecret($user) !== null) {
             Session::regenerate();
-            Session::set('2fa_pending_user', ['id' => (int) $user['id'], 'at' => time()]);
+            Session::set('2fa_pending_user', ['id' => (int) $user['id'], 'at' => time(), 'remember' => $remember]);
             return $this->redirect('/login/2fa');
         }
-        AuthService::completeLogin('user', $user, $request->ip());
+        AuthService::completeLogin('user', $user, $request->ip(), $remember);
+        if (AuthService::needsVerification($user)) {
+            return $this->redirect('/verify-email');
+        }
         $intended = (string) Session::pull('intended', '/dashboard');
         return $this->redirect(str_starts_with($intended, '/') && !str_starts_with($intended, '//') ? $intended : '/dashboard');
     }
@@ -58,8 +68,9 @@ final class AuthController extends Controller
             throw new ValidationException('Invalid authentication code.');
         }
         Session::forget('2fa_pending_user');
-        AuthService::completeLogin('user', $user, $request->ip());
-        return $this->redirect((string) Session::pull('intended', '/dashboard'));
+        AuthService::completeLogin('user', $user, $request->ip(), !empty($pending['remember']));
+        $intended = (string) Session::pull('intended', '/dashboard');
+        return $this->redirect(str_starts_with($intended, '/') && !str_starts_with($intended, '//') ? $intended : '/dashboard');
     }
 
     private function pending(): ?array
@@ -76,7 +87,7 @@ final class AuthController extends Controller
         if ($ref = $request->str('ref')) {
             Session::set('ref_code', mb_substr($ref, 0, 20));
         }
-        return $this->view('auth/register', ['title' => 'Create account', 'ref' => (string) Session::get('ref_code', ''), 'mobileMode' => AuthService::mobileMode()]);
+        return $this->view('auth/register', ['title' => 'Create account', 'ref' => (string) Session::get('ref_code', ''), 'mobileMode' => AuthService::mobileMode(), 'google' => GoogleAuthService::enabled()]);
     }
 
     public function register(Request $request): Response
@@ -87,6 +98,119 @@ final class AuthController extends Controller
         AuthService::completeLogin('user', $user, $request->ip());
         $this->success('Welcome aboard! Your account is ready.');
         return $this->redirect(AuthService::needsVerification($user) ? '/verify-email' : '/dashboard');
+    }
+
+    // ---------------------------------------------------------------- Google
+
+    /** GET /auth/google?intent=login|register → Google's consent screen. */
+    public function google(Request $request): Response
+    {
+        if (!GoogleAuthService::enabled()) {
+            $this->error('Sign in with Google is not available.');
+            return $this->redirect('/login');
+        }
+        if (Auth::user()) {
+            return $this->redirect('/dashboard');
+        }
+        return Response::redirect(GoogleAuthService::authorizationUrl($request->str('intent') === 'register' ? 'register' : 'login'));
+    }
+
+    /** POST /account/google/connect (signed in) → link Google to this account. */
+    public function googleConnect(Request $request): Response
+    {
+        return Response::redirect(GoogleAuthService::authorizationUrl('link', (int) $this->user()['id']));
+    }
+
+    public function googleDisconnect(Request $request): Response
+    {
+        GoogleAuthService::unlink($this->user());
+        $this->success('Google has been disconnected from your account.');
+        return $this->redirect('/account/security');
+    }
+
+    public function googleCallback(Request $request): Response
+    {
+        try {
+            $r = GoogleAuthService::handleCallback(['state' => $request->query('state'), 'code' => $request->query('code'), 'error' => $request->query('error')]);
+        } catch (ValidationException $e) {
+            $this->error($e->getMessage());
+            return $this->redirect(Auth::user() ? '/account/security' : '/login');
+        }
+        $profile = $r['profile'];
+
+        if ($r['intent'] === 'link') {
+            $current = Auth::user();
+            if (!$current || (int) $current['id'] !== (int) $r['link_user']) {
+                $this->error('Sign in first, then connect Google from Account → Security.');
+                return $this->redirect('/login');
+            }
+            GoogleAuthService::link((int) $current['id'], $profile);
+            $this->success('Google is now connected: you can sign in with ' . $profile['email'] . '.');
+            return $this->redirect('/account/security');
+        }
+
+        $match = GoogleAuthService::resolve($profile);
+        if ($match['status'] === 'blocked_unverified') {
+            $this->error('An account with ' . $profile['email'] . ' already exists. Sign in with your password, then connect Google in Account → Security.');
+            return $this->redirect('/login');
+        }
+        if ($match['status'] === 'new') {
+            if (setting('registration_enabled', '1') !== '1') {
+                $this->error('No account uses this Google address, and registration is currently closed.');
+                return $this->redirect('/login');
+            }
+            Session::set('google_signup', $profile + ['at' => time()]);
+            return $this->redirect('/auth/google/complete');
+        }
+        $user = $match['user'];
+        if ($user['status'] !== 'active') {
+            $this->error('Your account has been ' . $user['status'] . '. Please contact support.');
+            return $this->redirect('/login');
+        }
+        if ($match['status'] === 'link_existing') {
+            GoogleAuthService::link((int) $user['id'], $profile); // same verified email on both sides
+        }
+        GoogleAuthService::touch((int) $user['id']);
+        Database::instance()->insert('login_attempts', ['guard' => 'user', 'identifier' => $profile['email'], 'ip' => $request->ip(), 'success' => 1, 'user_agent' => mb_substr($request->userAgent(), 0, 255), 'created_at' => now()]);
+        return $this->finishLogin($user, $request, false);
+    }
+
+    /** New Google users choose a username (and mobile number / terms, per site settings). */
+    public function googleCompleteForm(Request $request): Response
+    {
+        $p = $this->googleSignup();
+        if (!$p) {
+            return $this->redirect('/register');
+        }
+        $base = preg_replace('/[^a-z0-9_]/', '', strtolower(strstr($p['email'], '@', true) ?: 'user')) ?: 'user';
+        $suggest = substr(str_pad($base, 3, '0'), 0, 24);
+        $db = Database::instance();
+        for ($i = 0; $i < 5 && $db->fetchColumn('SELECT id FROM users WHERE username = ?', [$suggest]); $i++) {
+            $suggest = substr($base, 0, 24) . random_int(10, 9999);
+        }
+        return $this->view('auth/google-complete', ['title' => 'Finish creating your account', 'profile' => $p, 'suggest' => $suggest, 'mobileMode' => AuthService::mobileMode()]);
+    }
+
+    public function googleComplete(Request $request): Response
+    {
+        $p = $this->googleSignup();
+        if (!$p) {
+            $this->error('Your Google sign-up expired. Please try again.');
+            return $this->redirect('/register');
+        }
+        $ref = preg_replace('/[^a-z0-9]/', '', strtolower((string) Session::get('ref_code', '')));
+        $user = AuthService::registerWithGoogle($p, $request->post(), $request->ip(), $ref);
+        Session::forget('google_signup');
+        Session::forget('ref_code');
+        AuthService::completeLogin('user', $user, $request->ip());
+        $this->success('Welcome aboard! Your account is ready.');
+        return $this->redirect('/dashboard');
+    }
+
+    private function googleSignup(): ?array
+    {
+        $p = Session::get('google_signup');
+        return is_array($p) && time() - (int) ($p['at'] ?? 0) < 1800 ? $p : null;
     }
 
     public function referral(Request $request, string $token): Response

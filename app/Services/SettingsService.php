@@ -45,7 +45,12 @@ final class SettingsService
         'email_verification' => '0',
         'email_verification_since' => '', // users created before verification was switched on are not blocked
         'registration_mobile' => '0',
-        'registration_mobile_required' => '0',
+        'registration_mobile_required' => '0', // legacy (before 2026_10_12); see registration_mobile_optional
+        'registration_mobile_optional' => '0', // with the mobile field ON: 0 = required, 1 = may be left empty
+        // Sign in with Google (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in .env take precedence)
+        'google_login_enabled' => '0',
+        'google_client_id' => '',
+        'google_client_secret' => '',
         'login_max_attempts' => '5',
         'login_lockout_minutes' => '15',
         'default_price_level' => '',
@@ -59,8 +64,10 @@ final class SettingsService
         'subscriptions_enabled' => '1',
         'subscription_max_cycles' => '100',
         // Funds
+        // Legacy global limits: converted into each gateway's min/max by migration 2026_10_12 and no longer enforced.
         'min_deposit' => '1',
         'max_deposit' => '10000',
+        'deposit_limits_per_gateway' => '1',
         'payment_expiry_minutes' => '60',
         // Referral
         'referral_enabled' => '1',
@@ -98,7 +105,7 @@ final class SettingsService
         'admin_notify_email' => '',
     ];
 
-    public const SECRET_KEYS = ['mail_password'];
+    public const SECRET_KEYS = ['mail_password', 'google_client_secret'];
 
     public static function boot(): void
     {

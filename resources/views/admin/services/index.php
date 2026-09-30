@@ -5,6 +5,7 @@
   <input class="input" type="search" name="q" value="<?= e($f['q']) ?>" placeholder="Name, ID or provider service ID">
   <select class="select" name="category" data-autosubmit><option value="">All categories</option><?php foreach ($categories as $id => $n): ?><option value="<?= (int) $id ?>"<?= $f['category'] === (int) $id ? ' selected' : '' ?>><?= e($n) ?></option><?php endforeach ?></select>
   <select class="select" name="provider" data-autosubmit><option value="">All providers</option><option value="manual"<?= $f['provider'] === 'manual' ? ' selected' : '' ?>>Manual</option><?php foreach ($providers as $id => $n): ?><option value="<?= (int) $id ?>"<?= $f['provider'] === (string) $id ? ' selected' : '' ?>><?= e($n) ?></option><?php endforeach ?></select>
+  <select class="select" name="type" data-autosubmit aria-label="Service type"><option value="">All types</option><?php foreach ($types as $k => $label): ?><option value="<?= e($k) ?>"<?= $f['type'] === $k ? ' selected' : '' ?>><?= e($k === 'subscription' ? 'Subscriptions (incl. services that allow them)' : $label) ?></option><?php endforeach ?></select>
   <select class="select" name="status" data-autosubmit><option value="">Any status</option><option value="active"<?= $f['status'] === 'active' ? ' selected' : '' ?>>Active</option><option value="disabled"<?= $f['status'] === 'disabled' ? ' selected' : '' ?>>Disabled</option><option value="hidden"<?= $f['status'] === 'hidden' ? ' selected' : '' ?>>Hidden</option></select>
   <button class="btn btn-secondary" type="submit"><?= icon('search') ?></button>
 </form>
@@ -25,7 +26,7 @@
       <tbody><?php foreach ($services->items as $s): ?>
         <tr><td data-label="Select"><input class="svc-check" type="checkbox" name="ids[]" value="<?= (int) $s['id'] ?>"></td>
           <td data-label="ID" class="mono"><?= (int) $s['id'] ?></td>
-          <td class="cell-main"><a class="cell-title" href="<?= e(admin_url('services/' . $s['id'] . '/edit')) ?>"><?= e(str_limit($s['name'], 70)) ?></a><div class="cell-sub"><?= e(\App\Services\OrderService::TYPES[$s['type']]['label'] ?? $s['type']) ?><?= $s['refill'] ? ' · refill' : '' ?><?= $s['cancel'] ? ' · cancel' : '' ?><?= $s['dripfeed'] ? ' · drip' : '' ?><?= $s['auto_sync'] ? ' · auto-sync' : '' ?></div></td>
+          <td class="cell-main"><a class="cell-title" href="<?= e(admin_url('services/' . $s['id'] . '/edit')) ?>"><?= e(str_limit($s['name'], 70)) ?></a><?php if ($s['type'] === 'subscription'): ?> <span class="badge badge-purple no-dot"><?= icon('refresh') ?> Subscription</span><?php elseif ((int) $s['subscription_enabled'] === 1): ?> <span class="badge badge-info no-dot" title="Can also be ordered as an auto-subscription"><?= icon('refresh') ?> Sub. allowed</span><?php endif ?><div class="cell-sub"><?= e(\App\Services\OrderService::TYPES[$s['type']]['label'] ?? $s['type']) ?><?= $s['refill'] ? ' · refill' : '' ?><?= $s['cancel'] ? ' · cancel' : '' ?><?= $s['dripfeed'] ? ' · drip' : '' ?><?= $s['auto_sync'] ? ' · auto-sync' : '' ?></div></td>
           <td data-label="Category" class="text-sm"><?= e($s['category']) ?></td>
           <td data-label="Rate" class="num fw-bold"><?= e(rate($s['rate'])) ?></td>
           <td data-label="Cost" class="num text-muted"><?= $s['provider_rate'] !== null ? e(rate($s['provider_rate'])) : '—' ?></td>

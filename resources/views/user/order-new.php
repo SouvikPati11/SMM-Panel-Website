@@ -42,7 +42,8 @@ foreach (array_merge($platforms, [Platforms::OTHER]) as $p) {
         <label for="category">Category</label>
         <div class="select-icon"><span class="select-icon-glyph" id="category-icon" aria-hidden="true"><?= $icons[$categories[0]['p']] ?? '' ?></span>
           <select class="select" id="category" name="category">
-            <?php foreach ($categories as $c): ?><option value="<?= (int) $c['id'] ?>" data-platform="<?= e($c['p']) ?>"><?= e($c['n']) ?></option><?php endforeach ?>
+            <?php $perCat = array_count_values(array_column($services, 'c'));
+            foreach ($categories as $c): $n = (int) ($perCat[(int) $c['id']] ?? 0); ?><option value="<?= (int) $c['id'] ?>" data-platform="<?= e($c['p']) ?>" data-sub="<?= e(Platforms::label($c['p'])) ?>" data-meta="<?= $n ?> <?= $n === 1 ? 'service' : 'services' ?>"><?= e($c['n']) ?></option><?php endforeach ?>
           </select></div>
       </div>
 
@@ -116,7 +117,7 @@ foreach (array_merge($platforms, [Platforms::OTHER]) as $p) {
       <div id="field-subscription" hidden>
         <div class="form-grid">
           <div class="field"><label for="sub_interval">Repeat</label><select class="select" id="sub_interval" name="sub_interval"><?php foreach ($intervals as $h => $label): ?><option value="<?= (int) $h ?>"<?= $h === 24 ? ' selected' : '' ?>><?= e($label) ?></option><?php endforeach ?></select></div>
-          <div class="field"><label for="sub_cycles">Number of deliveries</label><input class="input" id="sub_cycles" name="sub_cycles" type="number" inputmode="numeric" min="2" max="<?= (int) $maxCycles ?>" value="7"></div>
+          <div class="field"><label for="sub_cycles">Number of deliveries</label><input class="input" id="sub_cycles" name="sub_cycles" type="number" inputmode="numeric" min="2" max="<?= (int) $maxCycles ?>" value="7"><div class="hint" id="sub-cycles-hint"></div></div>
         </div>
         <p class="hint" style="margin-top:-6px">The same order is placed automatically on each schedule. The first delivery is charged now; each later one is charged from your balance when it is placed. Pause or cancel at any time.</p>
       </div>

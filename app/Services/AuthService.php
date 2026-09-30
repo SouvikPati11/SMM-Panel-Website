@@ -52,13 +52,73 @@ final class AuthService
             throw new ValidationException('Too many accounts were created from your network today. Please try again later.');
         }
 
-        $userId = $db->transaction(static function (Database $db) use ($data, $email, $ip, $mobile): int {
+        $userId = self::createAccount([
+            'username' => $data['username'],
+            'email' => $email,
+            'mobile' => $mobile,
+            'password_hash' => password_hash($data['password'], PASSWORD_DEFAULT),
+        ], $ip, $refCode);
+        AuditService::log('user.register', 'user', $userId, [], 'user', $userId);
+        if (setting('email_verification', '0') === '1') {
+            self::sendVerification($userId);
+        }
+        return $db->fetch('SELECT * FROM users WHERE id = ?', [$userId]);
+    }
+
+    /**
+     * Finish a "Sign in with Google" registration: the Google profile is already
+     * verified (email_verified claim), the user picks a username and, when the
+     * site asks for it, a mobile number. No password is set until they choose one.
+     * @param array{sub:string,email:string,name:?string} $profile
+     */
+    public static function registerWithGoogle(array $profile, array $input, string $ip, string $refCode = ''): array
+    {
+        if (setting('registration_enabled', '1') !== '1') {
+            throw new ValidationException('Registration is currently closed.');
+        }
+        $data = Validator::check($input, ['username' => 'required|username']);
+        if (empty($input['terms'])) {
+            throw new ValidationException('You must accept the Terms of Service.');
+        }
+        $mobile = self::validateMobile((string) ($input['mobile'] ?? ''));
+        $db = Database::instance();
+        $email = strtolower($profile['email']);
+        if ($db->fetchColumn('SELECT id FROM users WHERE username = ?', [$data['username']])) {
+            throw new ValidationException('That username is already taken.');
+        }
+        if ($db->fetchColumn('SELECT id FROM users WHERE email = ?', [$email])) {
+            throw new ValidationException('An account with this email already exists. Sign in with your password, then connect Google in Account → Security.');
+        }
+        if ($db->fetchColumn("SELECT id FROM user_social_accounts WHERE provider = 'google' AND provider_user_id = ?", [$profile['sub']])) {
+            throw new ValidationException('This Google account is already connected to an account. Sign in instead.');
+        }
+        $recent = (int) $db->fetchColumn('SELECT COUNT(*) FROM users WHERE register_ip = ? AND created_at > ?', [$ip, gmdate('Y-m-d H:i:s', time() - 86400)]);
+        if ($recent >= 5) {
+            throw new ValidationException('Too many accounts were created from your network today. Please try again later.');
+        }
+        $userId = self::createAccount([
+            'username' => $data['username'],
+            'email' => $email,
+            'mobile' => $mobile,
+            'name' => $profile['name'] ? mb_substr((string) $profile['name'], 0, 100) : null,
+            // Unusable random password: signing in with a password is impossible until the user sets one.
+            'password_hash' => password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT),
+            'password_set' => 0,
+            'email_verified_at' => now(), // Google verified the address (email_verified = true)
+        ], $ip, $refCode, static function (Database $db, int $id) use ($profile, $email): void {
+            $db->insert('user_social_accounts', ['user_id' => $id, 'provider' => 'google', 'provider_user_id' => $profile['sub'], 'email' => $email, 'created_at' => now(), 'last_login_at' => now()]);
+        });
+        AuditService::log('user.register', 'user', $userId, ['via' => 'google'], 'user', $userId);
+        return $db->fetch('SELECT * FROM users WHERE id = ?', [$userId]);
+    }
+
+    /** Insert the user, wallet and automatic price level atomically. */
+    private static function createAccount(array $fields, string $ip, string $refCode, ?callable $inTransaction = null): int
+    {
+        $db = Database::instance();
+        $userId = $db->transaction(static function (Database $db) use ($fields, $ip, $inTransaction): int {
             $level = setting('default_price_level', '');
-            $id = $db->insert('users', [
-                'username' => $data['username'],
-                'email' => $email,
-                'mobile' => $mobile,
-                'password_hash' => password_hash($data['password'], PASSWORD_DEFAULT),
+            $id = $db->insert('users', $fields + [
                 'status' => 'active',
                 'price_level_id' => $level !== '' && ctype_digit((string) $level) ? (int) $level : null,
                 'referral_code' => self::uniqueReferralCode(),
@@ -68,25 +128,27 @@ final class AuthService
             ]);
             WalletService::createWallet($id);
             PriceLevelService::sync($id); // automatic level (threshold 0 or the default level)
+            if ($inTransaction) {
+                $inTransaction($db, $id);
+            }
             return $id;
         });
         if ($refCode !== '') {
             ReferralService::attach($userId, $refCode, $ip);
         }
-        AuditService::log('user.register', 'user', $userId, [], 'user', $userId);
-        if (setting('email_verification', '0') === '1') {
-            self::sendVerification($userId);
-        }
-        return $db->fetch('SELECT * FROM users WHERE id = ?', [$userId]);
+        return $userId;
     }
 
-    /** Mobile field mode from Admin → Settings → Users: off | optional | required. */
+    /**
+     * Mobile field mode from Admin → Settings → Users: off | optional | required.
+     * "Mobile number ON" means required, unless the admin also ticked "optional".
+     */
     public static function mobileMode(): string
     {
         if (setting('registration_mobile', '0') !== '1') {
             return 'off';
         }
-        return setting('registration_mobile_required', '0') === '1' ? 'required' : 'optional';
+        return setting('registration_mobile_optional', '0') === '1' ? 'optional' : 'required';
     }
 
     /**
@@ -197,7 +259,7 @@ final class AuthService
         return $row;
     }
 
-    public static function completeLogin(string $guard, array $row, string $ip): void
+    public static function completeLogin(string $guard, array $row, string $ip, bool $remember = false): void
     {
         $table = $guard === 'admin' ? 'admins' : 'users';
         Database::instance()->update($table, ['last_login_at' => now(), 'last_login_ip' => $ip], ['id' => $row['id']]);
@@ -206,6 +268,9 @@ final class AuthService
             AuditService::log('admin.login', 'admin', (int) $row['id'], [], 'admin', (int) $row['id']);
         } else {
             Auth::loginUser($row);
+            if ($remember) {
+                RememberService::issue($row);
+            }
             AuditService::log('user.login', 'user', (int) $row['id'], [], 'user', (int) $row['id']);
         }
     }
@@ -248,7 +313,9 @@ final class AuthService
 
     public static function changePassword(string $guard, array $row, string $current, string $new, string $confirm): void
     {
-        if (!password_verify($current, $row['password_hash'])) {
+        // Accounts created with Google have no password yet: they set one without a "current" password.
+        $settingFirst = $guard === 'user' && (int) ($row['password_set'] ?? 1) === 0;
+        if (!$settingFirst && !password_verify($current, $row['password_hash'])) {
             throw new ValidationException('Your current password is incorrect.');
         }
         Validator::check(['password' => $new, 'password_confirmation' => $confirm], ['password' => self::PASSWORD_RULE . '|confirmed'], ['password' => 'New password']);
@@ -256,6 +323,10 @@ final class AuthService
         $table = $guard === 'admin' ? 'admins' : 'users';
         $db = Database::instance();
         $db->query("UPDATE {$table} SET password_hash = ?, session_version = session_version + 1, updated_at = ? WHERE id = ?", [password_hash($new, PASSWORD_DEFAULT), now(), $row['id']]);
+        if ($guard === 'user') {
+            $db->query('UPDATE users SET password_set = 1 WHERE id = ?', [$row['id']]);
+            RememberService::forgetAll((int) $row['id']);
+        }
         $fresh = $db->fetch("SELECT * FROM {$table} WHERE id = ?", [$row['id']]);
         // Keep this session, invalidate all others.
         $guard === 'admin' ? Auth::loginAdmin($fresh) : Auth::loginUser($fresh);
@@ -316,6 +387,10 @@ final class AuthService
                 throw new ValidationException('This reset link has already been used.');
             }
             $db->query("UPDATE {$table} SET password_hash = ?, session_version = session_version + 1, updated_at = ? WHERE id = ?", [password_hash($password, PASSWORD_DEFAULT), now(), $reset['account_id']]);
+            if ($guard === 'user') {
+                $db->query('UPDATE users SET password_set = 1 WHERE id = ?', [$reset['account_id']]);
+                $db->query('DELETE FROM remember_tokens WHERE user_id = ?', [$reset['account_id']]);
+            }
             $db->query('UPDATE password_resets SET used_at = ? WHERE guard = ? AND account_id = ? AND used_at IS NULL', [now(), $guard, $reset['account_id']]);
         });
         AuditService::log($guard . '.password_reset', $guard, (int) $reset['account_id'], [], 'system');

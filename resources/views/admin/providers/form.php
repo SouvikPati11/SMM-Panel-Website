@@ -5,7 +5,8 @@
 <div class="grid-main">
   <div class="card"><div class="card-body">
     <?= Form::input('name', 'Name', $p['name'] ?? '', ['required' => true]) ?>
-    <?= Form::input('api_url', 'API URL', $p['api_url'] ?? '', ['required' => true, 'placeholder' => 'https://provider.example/api/v2', 'hint' => 'Exactly as shown in your provider\'s API documentation. HTTPS required.']) ?>
+    <?= Form::input('api_url', 'API URL', $p['api_url'] ?? '', ['required' => true, 'placeholder' => 'https://provider.example/api/v2', 'inputmode' => 'url', 'hint' => 'Exactly as shown in your provider\'s API documentation (usually ends in <code>/api/v2</code>).']) ?>
+    <div class="field"><?= Form::check('allow_http', 'Allow plain HTTP (the API key is sent unencrypted — only if the provider has no HTTPS)', str_starts_with((string) ($p['api_url'] ?? ''), 'http://')) ?></div>
     <?= Form::input('api_key', 'API key', '', ['type' => 'password', 'autocomplete' => 'off', 'required' => !$provider, 'hint' => $provider ? 'Stored encrypted. Current: <code>' . e($maskedKey) . '</code> — leave empty to keep.' : 'Stored encrypted with your APP_KEY; never shown again.']) ?>
     <div class="form-grid">
       <?= Form::select('adapter', 'API format', array_map(fn ($a) => $a['label'], $adapters), $p['adapter'] ?? 'standard_v2') ?>
@@ -21,7 +22,16 @@
     <h3>Standard API v2</h3>
     <p>Requests are <code>POST</code> form fields <code>key</code> + <code>action</code>:</p>
     <ul style="padding-left:18px"><li><code>services</code> — catalog</li><li><code>add</code> — new order</li><li><code>status</code> — single / multi (<code>orders=1,2</code>)</li><li><code>refill</code>, <code>refill_status</code></li><li><code>cancel</code></li><li><code>balance</code></li></ul>
-    <p class="mb-0">Example config for a panel that names the key <code>api_token</code> and lacks multi-status:</p>
+    <p>Example config for a panel that names the key <code>api_token</code> and lacks multi-status:</p>
     <pre><code>{"key_param":"api_token","multi_status":false}</code></pre>
+    <p>Key sent as a header instead of a form field:</p>
+    <pre><code>{"key_in":"bearer"}</code></pre>
+    <h3 class="mt-2">Troubleshooting</h3>
+    <ul style="padding-left:18px" class="mb-0">
+      <li><strong>Unexpected balance response</strong>: the error lists the JSON keys received. Open <a href="<?= e(admin_url('providers/logs?errors=1')) ?>">API logs</a> for the full (key-redacted) response.</li>
+      <li><strong>HTML page instead of JSON</strong>: wrong URL, or the provider's firewall blocks your server IP.</li>
+      <li><strong>Redirects</strong>: use the final https:// URL shown in the error.</li>
+      <li><strong>Provider error: Invalid API key</strong>: re-copy the key; some panels bind keys to IPs.</li>
+    </ul>
   </div></div>
 </div></form>

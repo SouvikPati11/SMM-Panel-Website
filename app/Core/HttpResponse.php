@@ -13,7 +13,14 @@ final class HttpResponse
         public readonly ?string $error = null,
         /** true when the request never reached the remote host (safe to retry) */
         public readonly bool $notSent = false,
+        /** @var array<string,string> lower-case header name => last value */
+        public readonly array $headers = [],
     ) {
+    }
+
+    public function header(string $name): ?string
+    {
+        return $this->headers[strtolower($name)] ?? null;
     }
 
     public function ok(): bool

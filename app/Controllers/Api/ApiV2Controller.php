@@ -82,6 +82,11 @@ final class ApiV2Controller extends Controller
         );
         $out = [];
         foreach ($rows as $s) {
+            if ($s['type'] === 'subscription') {
+                // Panel-side subscriptions are website-only; API v2 "Subscriptions" means a different
+                // (provider-side, username/posts) contract that this panel does not offer.
+                continue;
+            }
             $out[] = [
                 'service' => (int) $s['id'],
                 'name' => $s['name'],

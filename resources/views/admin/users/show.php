@@ -2,7 +2,13 @@
 <div class="page-head">
   <div><ol class="breadcrumb"><li><a href="<?= e(admin_url('users')) ?>">Users</a></li><li>#<?= (int) $user['id'] ?></li></ol>
     <h1><?= e($user['username']) ?> <?= status_badge($user['status']) ?></h1>
-    <p><?= e($user['email']) ?> · joined <?= e(fmt_date($user['created_at'], 'M j, Y')) ?> from <?= e($user['register_ip'] ?: '—') ?><?= $user['referrer'] ? ' · referred by ' . e($user['referrer']) : '' ?></p></div>
+    <p><?= e($user['email']) ?><?= $user['mobile'] ? ' · ' . e($user['mobile']) : '' ?> · joined <?= e(fmt_date($user['created_at'], 'M j, Y')) ?> from <?= e($user['register_ip'] ?: '—') ?><?= $user['referrer'] ? ' · referred by ' . e($user['referrer']) : '' ?></p></div>
+  <?php if (can('users.balance')): $openBalance = (string) \App\Core\App::request()->query('balance', ''); ?>
+  <div class="btn-group">
+    <button class="btn btn-primary" type="button" data-open-dialog="balance-dialog" data-fill='{"direction":"add"}' data-balance-title="Add balance"<?= $openBalance === 'add' ? ' data-click-on-load' : '' ?>><?= icon('plus') ?> Add balance</button>
+    <button class="btn btn-secondary" type="button" data-open-dialog="balance-dialog" data-fill='{"direction":"subtract"}' data-balance-title="Remove balance"<?= $openBalance === 'remove' ? ' data-click-on-load' : '' ?>><?= icon('minus') ?> Remove balance</button>
+  </div>
+  <?php endif ?>
 </div>
 <div class="stats">
   <div class="stat balance-card"><div><div class="stat-label">Balance</div><div class="stat-value"><?= e(money($user['balance'], 4)) ?></div><div class="stat-meta">Referral wallet <?= e(money($user['referral_balance'])) ?></div></div></div>
@@ -40,7 +46,12 @@
 
   <div>
     <?php if (can('users.balance')): ?>
-    <div class="card mb-2"><div class="card-header"><h2>Add / remove balance</h2></div><div class="card-body">
+    <div class="card mb-2"><div class="card-header"><h2>Balance</h2><a class="text-sm" href="<?= e($base . '?tab=adjustments') ?>">History</a></div><div class="card-body">
+      <div class="balance-summary"><div><div class="text-sm text-muted">Current balance</div><div class="balance-summary-value"><?= e(money($user['balance'], 4)) ?></div></div>
+        <div class="btn-group"><button class="btn btn-primary btn-sm" type="button" data-open-dialog="balance-dialog" data-fill='{"direction":"add"}'><?= icon('plus') ?> Add</button><button class="btn btn-secondary btn-sm" type="button" data-open-dialog="balance-dialog" data-fill='{"direction":"subtract"}'><?= icon('minus') ?> Remove</button></div></div>
+      <p class="hint mb-0 mt-1"><?= (int) $user['allow_negative'] === 1 ? 'Negative balance (credit line) allowed.' : 'The balance cannot go below zero.' ?> Every change is written to the ledger and audit log.</p>
+    </div></div>
+    <dialog class="modal" id="balance-dialog" aria-labelledby="balance-dialog-title"><div class="modal-head"><h3 id="balance-dialog-title">Add / remove balance</h3><button class="btn btn-ghost btn-icon btn-sm" type="button" data-close-dialog aria-label="Close"><?= icon('x') ?></button></div><div class="modal-body">
       <form method="post" action="<?= e($base . '/balance') ?>" data-confirm="Apply this balance change?"><?= csrf_field() ?><input type="hidden" name="adjust_key" value="<?= e($adjustKey) ?>">
         <div class="segmented mb-2" role="radiogroup" aria-label="Add or remove">
           <label><input type="radio" name="direction" value="add" checked> <span><?= icon('plus') ?> Add</span></label>
@@ -52,8 +63,8 @@
         <p class="text-sm mb-1">Current balance <strong><?= e(money($user['balance'], 4)) ?></strong><?= (int) $user['allow_negative'] === 1 ? ' · negative balance allowed' : ' · cannot go below zero' ?></p>
         <button class="btn btn-primary btn-block" type="submit">Apply</button>
       </form>
-      <p class="hint mb-0">Each change creates a ledger entry with the balance before and after, your admin account and the time, and an audit-log entry. See the <a href="<?= e($base . '?tab=adjustments') ?>">Balance adjustments</a> tab.</p>
-    </div></div>
+      <p class="hint mb-0">Each change creates a ledger entry with the balance before and after, your admin account and the time, and an audit-log entry. The user sees it in their transaction history. See the <a href="<?= e($base . '?tab=adjustments') ?>">Balance adjustments</a> tab.</p>
+    </div></dialog>
     <?php endif ?>
 
     <div class="card mb-2"><div class="card-header"><h2>Price level</h2><?= $levelInfo['manual'] ? '<span class="badge badge-purple no-dot">manual</span>' : '<span class="badge badge-info no-dot">automatic</span>' ?></div><div class="card-body"><dl class="dl" style="grid-template-columns:140px minmax(0,1fr)">

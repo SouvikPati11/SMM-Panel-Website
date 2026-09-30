@@ -150,7 +150,9 @@ touch storage/installed.lock
 `.env` (see [`.env.example`](.env.example)) holds only what must exist before
 the database is reachable: `APP_URL`, `APP_KEY`, `APP_DEBUG`, `ADMIN_PATH`,
 `FORCE_HTTPS`, `TRUSTED_PROXIES`, `DB_*`, session options, fallback `MAIL_*`,
-`UPLOAD_MAX_BYTES`, `CRON_KEY`. Everything else is edited in **Admin →
+`UPLOAD_MAX_BYTES`, `CRON_KEY`, and optionally `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URI` for Sign in with Google (see
+[`docs/google-login.md`](docs/google-login.md)). Everything else is edited in **Admin →
 Settings / Email / SEO / Payment gateways / Providers** and stored in the
 `settings` table (secrets encrypted).
 
@@ -275,7 +277,17 @@ nothing to do. Migrations never delete data: they add tables and columns and onl
 re-derive cached values from the ledger. `2026_10_05_subscriptions_currency_levels`, for
 example, adds subscriptions, display currencies, deposit thresholds and the mobile
 field. It keeps admin-assigned price levels and leaves existing levels without a
-threshold, so nobody is auto-promoted. Without SSH, use **Admin → System health → Apply database
+threshold, so nobody is auto-promoted.
+`2026_10_12_subscription_type_oauth_gateway_limits` makes these changes:
+
+- adds the *Subscriptions* service type and per-service subscription settings;
+- adds the provider "syncing" state;
+- adds Google sign-in (`user_social_accounts`, `users.password_set`);
+- adds remember-me tokens (`remember_tokens`);
+- converts the global deposit minimum/maximum into each gateway's own limits,
+  keeping the effective values ([details](docs/payment-gateways.md#deposit-limits-per-gateway)).
+
+Without SSH, use **Admin → System health → Apply database
 upgrades**, which runs the same migrations.
 
 ---
@@ -389,7 +401,7 @@ php tests/run.php            # all suites
 php tests/run.php Payment    # one suite
 ```
 
-The suite drops and recreates every table in the test database, then runs 179
+The suite drops and recreates every table in the test database, then runs 204
 integration tests through the real services and the full HTTP kernel, with a
 fake HTTP transport standing in for providers and gateways:
 
@@ -406,6 +418,10 @@ fake HTTP transport standing in for providers and gateways:
 | Accounts & admin | mobile field off/optional/required, email verification on/off with expiring single-use tokens, resend and grandfathering, balance add/remove ledger + audit + idempotency + permissions, order status transitions and idempotent refunds |
 | Currency & levels | exact display conversion, admin validation, per-user choice never converting stored values, base currency in admin/funds, deposit thresholds (credited only, no double count, pending/held/failed/rejected excluded), manual override, safe migration |
 | Order page & SEO | platform detection, server-side quote, JSON confirm, double submit, homepage headings/alt/meta/OG/Twitter/JSON-LD, canonical, robots/sitemap consistency, X-Robots-Tag on private pages |
+| Providers | balance/services parsing of every unambiguous API v2 variant (strings, numbers, separators, symbols, wrappers, BOM/notice noise), diagnostics without the key (errors + redacted logs), HTML/redirect/empty/status-message errors, bearer-key mode, provider states, admin add/edit (HTTPS opt-in, key kept), import skipping provider-side subscriptions |
+| Subscription type | admin create with intervals/min/max, subscription-only enforcement (web, mass, API), schedule limits, cron delivery as a standard API v2 `add` |
+| Google & remember me | state/nonce/PKCE, forged or replayed state, aud/iss/exp/nonce/email_verified checks, new user completion with mobile/terms, verified-email linking vs pre-hijacking refusal, 2FA/suspension, connect/disconnect, encrypted secret; remember-me cookie hashing, restore, rotation, theft/version/logout invalidation |
+| Deposits & content | per-gateway min/max (service, HTTP, admin), one-time migration of the global limits, blog admin (validation, scheduling, publish toggle, public visibility, permissions), API Access page (key shown once, no cross-user leak), admin balance controls |
 
 Also verified manually during development: every public, customer and admin
 page renders without PHP/JS errors, with no horizontal overflow at 360, 390,
@@ -417,6 +433,7 @@ overlapping runs; and against a real Apache the `.htaccess` rules return 403 for
 
 ### Manual test checklist before going live
 - [ ] Register, verify email (if enabled), log in, enable 2FA, log out, reset password.
+- [ ] If Sign in with Google is enabled: sign up and sign in once with a real Google account ([docs/google-login.md](docs/google-login.md#3-the-one-manual-test)).
 - [ ] Add a provider → test connection → import 2–3 services with markup.
 - [ ] Place a small real order; watch it move to completed via cron.
 - [ ] Make a small **real** OxaPay/Cryptomus payment; confirm webhook log shows *Credited* and the balance increased once.
@@ -472,9 +489,16 @@ and database backed up · `TRUSTED_PROXIES` set if you use Cloudflare.
   are treated as unsigned notifications and every payment is confirmed through
   `check-order-status`. No sandbox or test mode is documented, and the gateway
   is only offered when the site currency is INR (the account currency setting).
-- **Provider integration** follows the standard API v2 contract; each provider's
-  real responses should be checked once with *Test connection*/*Fetch services*.
-  Exotic providers may need the JSON parameter map or a custom adapter.
+- **Provider integration** follows the standard API v2 contract and accepts
+  common response variants (see [`docs/provider-api.md`](docs/provider-api.md#response-formats-accepted)).
+  Each provider's real responses should be checked once with *Test
+  connection* and *Fetch services*. The build environment could not reach
+  real providers (for example smmexporter.in), so formats were tested against
+  fixtures. Exotic providers may need the JSON parameter map or a custom
+  adapter.
+- **Sign in with Google** can't be tested end to end without real Google
+  credentials. The flow was tested against a fake token endpoint; one manual
+  test on the live domain is required.
 - 2FA setup shows a secret key and an `otpauth://` link, not a QR image (no
   external QR library/CDN is used).
 - Page/blog editing is a raw HTML textarea (sanitised), not a WYSIWYG editor.

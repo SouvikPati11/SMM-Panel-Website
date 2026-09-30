@@ -26,24 +26,30 @@ final class OrderController extends Controller
              WHERE c.status = 'active' AND s.status = 'active' AND s.is_hidden = 0 ORDER BY c.sort_order, c.name"
         );
         $rows = $db->fetchAll(
-            "SELECT s.id, s.category_id, s.name, s.rate, s.type, s.link_label, s.min_quantity, s.max_quantity, s.dripfeed, s.subscription_enabled, s.refill, s.cancel, s.average_time, s.custom_fields
+            "SELECT s.id, s.category_id, s.name, s.rate, s.type, s.link_label, s.min_quantity, s.max_quantity, s.dripfeed, s.subscription_enabled, s.subscription_intervals, s.subscription_min_cycles, s.subscription_max_cycles, s.refill, s.cancel, s.average_time, s.custom_fields
              FROM services s JOIN categories c ON c.id = s.category_id
              WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active' ORDER BY c.sort_order, s.sort_order, s.id"
         );
         $services = [];
-        $subs = SubscriptionService::enabled();
         foreach ($rows as $s) {
             $custom = json_decode((string) $s['custom_fields'], true) ?: [];
+            $sub = SubscriptionService::options($s);
+            if ($sub['only'] && !$sub['allowed']) {
+                continue; // subscription-only service while subscriptions are switched off
+            }
             $services[] = [
                 'id' => (int) $s['id'], 'c' => (int) $s['category_id'], 'n' => $s['name'],
                 'r' => OrderService::userRate($s, $user), 'ty' => $s['type'], 'l' => $s['link_label'],
                 'lt' => $custom['link_type'] ?? 'url',
                 'mi' => (int) $s['min_quantity'], 'ma' => (int) $s['max_quantity'],
                 'df' => (int) $s['dripfeed'] === 1, 'rf' => (int) $s['refill'] === 1, 'cn' => (int) $s['cancel'] === 1,
-                'sb' => $subs && (int) $s['subscription_enabled'] === 1,
+                'sb' => $sub['allowed'], 'so' => $sub['only'],
+                'si' => $sub['allowed'] ? array_map('strval', array_keys($sub['intervals'])) : [], 'smi' => $sub['min'], 'sma' => $sub['max'],
                 't' => (string) $s['average_time'], 'pk' => OrderService::TYPES[$s['type']]['package'] ?? false,
             ];
         }
+        $withServices = array_flip(array_column($services, 'c'));
+        $categories = array_values(array_filter($categories, static fn ($c) => isset($withServices[(int) $c['id']])));
         return [array_map(static fn ($c) => ['id' => (int) $c['id'], 'n' => $c['name'], 'p' => Platforms::detect($c['name'])], $categories), $services];
     }
 
@@ -122,18 +128,13 @@ final class OrderController extends Controller
         if ($params['runs']) {
             $out['notes'][] = "Drip-feed: {$params['runs']} runs every {$params['interval']} min (total " . number_format($params['quantity'] * $params['runs']) . ').';
         }
+        if (!$isSub && SubscriptionService::options($service)['only']) {
+            throw new ValidationException('"' . $service['name'] . '" is a subscription service: choose how often it repeats.');
+        }
         if ($isSub) {
-            if ((int) $service['subscription_enabled'] !== 1 || !SubscriptionService::enabled()) {
-                throw new ValidationException('This service does not support auto-subscriptions.');
-            }
             $hours = $request->int('sub_interval');
             $cycles = $request->int('sub_cycles');
-            if (!isset(SubscriptionService::INTERVALS[$hours])) {
-                throw new ValidationException('Choose how often the order should repeat.');
-            }
-            if ($cycles < 2 || $cycles > SubscriptionService::maxCycles()) {
-                throw new ValidationException('Number of deliveries must be between 2 and ' . SubscriptionService::maxCycles() . '.');
-            }
+            SubscriptionService::assertSchedule($service, $hours, $cycles);
             $out['subscription'] = [
                 'interval' => SubscriptionService::INTERVALS[$hours],
                 'cycles' => $cycles,

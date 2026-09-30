@@ -123,6 +123,7 @@ $router->group(['prefix' => $prefix, 'middleware' => ['csrf']], static function 
         $router->get('/blog/{id}/edit', [Admin\ContentController::class, 'postForm'], 'admin.blog.edit', ['perm:content.manage']);
         $router->post('/blog/save', [Admin\ContentController::class, 'savePost'], 'admin.blog.save', ['perm:content.manage']);
         $router->post('/blog/{id}/delete', [Admin\ContentController::class, 'deletePost'], 'admin.blog.delete', ['perm:content.manage']);
+        $router->post('/blog/{id}/toggle', [Admin\ContentController::class, 'togglePost'], 'admin.blog.toggle', ['perm:content.manage']);
         $router->post('/blog/categories/save', [Admin\ContentController::class, 'saveBlogCategory'], 'admin.blog.categories.save', ['perm:content.manage']);
         $router->post('/blog/categories/{id}/delete', [Admin\ContentController::class, 'deleteBlogCategory'], 'admin.blog.categories.delete', ['perm:content.manage']);
 

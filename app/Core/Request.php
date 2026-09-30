@@ -180,6 +180,12 @@ final class Request
         return substr((string) ($this->server['HTTP_USER_AGENT'] ?? ''), 0, 255);
     }
 
+    public function cookie(string $name): ?string
+    {
+        $v = $this->cookies[$name] ?? null;
+        return is_string($v) ? $v : null;
+    }
+
     public function isSecure(): bool
     {
         if (($this->server['HTTPS'] ?? '') !== '' && strtolower((string) $this->server['HTTPS']) !== 'off') {
@@ -227,7 +233,14 @@ final class Request
     public static function create(string $method, string $path, array $params = [], array $server = [], ?string $rawBody = null): self
     {
         $server += ['REMOTE_ADDR' => '127.0.0.1', 'REQUEST_METHOD' => $method];
-        $req = new self(strtoupper($method), $path, strtoupper($method) === 'GET' ? $params : [], strtoupper($method) === 'GET' ? [] : $params, [], $server);
+        $cookies = [];
+        foreach (explode(';', (string) ($server['HTTP_COOKIE'] ?? '')) as $pair) {
+            if (str_contains($pair, '=')) {
+                [$k, $v] = explode('=', $pair, 2);
+                $cookies[trim($k)] = rawurldecode(trim($v));
+            }
+        }
+        $req = new self(strtoupper($method), $path, strtoupper($method) === 'GET' ? $params : [], strtoupper($method) === 'GET' ? [] : $params, [], $server, $cookies);
         if ($rawBody !== null) {
             $req->setRawBody($rawBody);
         }

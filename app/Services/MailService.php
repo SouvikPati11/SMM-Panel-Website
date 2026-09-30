@@ -29,6 +29,13 @@ final class MailService
         ]);
     }
 
+    /** Whether real email delivery is set up (SMTP host, or PHP mail()). */
+    public static function isConfigured(): bool
+    {
+        $c = SettingsService::mailConfig();
+        return ($c['driver'] === 'smtp' && trim((string) $c['host']) !== '') || $c['driver'] === 'mail';
+    }
+
     /** Try to send immediately; on failure fall back to the queue. */
     public static function sendNow(string $to, string $subject, string $bodyHtml): bool
     {

@@ -56,6 +56,7 @@ final class App
     {
         self::$request = $request;
         \App\Services\CurrencyService::reset(); // display currency is resolved per request
+        Cookie::reset();
 
         // Before installation, everything goes to the installer.
         if (!self::isInstalled()) {
@@ -78,6 +79,7 @@ final class App
         $request->setAttribute('route_params', $params);
 
         $stateless = in_array('stateless', $route['middleware'], true);
+        $request->setAttribute('session', !$stateless);
         if (!$stateless) {
             Session::start($request);
             Session::ageFlashInput();
@@ -133,6 +135,7 @@ final class App
 
     private static function secure(Response $response, Request $request): Response
     {
+        Cookie::attach($response);
         $response->withHeader('X-Content-Type-Options', 'nosniff')
             ->withHeader('X-Frame-Options', 'SAMEORIGIN')
             ->withHeader('Referrer-Policy', 'strict-origin-when-cross-origin')

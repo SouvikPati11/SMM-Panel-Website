@@ -54,15 +54,18 @@ final class ProviderController extends Controller
     {
         $db = Database::instance();
         $id = $request->int('id');
-        $data = Validator::check($request->post(), [
+        $post = $request->post();
+        // Pasted URLs often carry spaces or a trailing slash/newline.
+        $post['api_url'] = self::normaliseUrl((string) ($post['api_url'] ?? ''));
+        $data = Validator::check($post, [
             'name' => 'required|max:100',
             'api_url' => 'required|url|max:255',
             'currency' => 'required|regex:/^[A-Za-z]{3}$/',
             'exchange_rate' => 'required|decimal|min:0.00000001',
             'timeout' => 'integer|min:5|max:120',
         ]);
-        if (!str_starts_with(strtolower($data['api_url']), 'https://')) {
-            throw new ValidationException('The API URL must use HTTPS so your API key is not sent in clear text.');
+        if (!str_starts_with(strtolower($data['api_url']), 'https://') && !$request->bool('allow_http')) {
+            throw new ValidationException('The API URL uses http://, so your API key would be sent unencrypted. Use the https:// URL, or tick "Allow plain HTTP" if the provider has no HTTPS.');
         }
         $adapter = $request->str('adapter') ?: 'standard_v2';
         if (!isset(ProviderFactory::ADAPTERS[$adapter])) {
@@ -77,7 +80,16 @@ final class ProviderController extends Controller
             }
             $allowed = array_keys(StandardApiV2Adapter::DEFAULT_CONFIG);
             if ($unknown = array_diff(array_keys($decoded), $allowed)) {
-                throw new ValidationException('Unknown config keys: ' . implode(', ', $unknown));
+                throw new ValidationException('Unknown config keys: ' . implode(', ', $unknown) . '. Allowed: ' . implode(', ', $allowed) . '.');
+            }
+            if (isset($decoded['key_in']) && !in_array($decoded['key_in'], ['param', 'bearer', 'header'], true)) {
+                throw new ValidationException('"key_in" must be "param", "bearer" or "header".');
+            }
+            if (isset($decoded['method']) && !in_array(strtoupper((string) $decoded['method']), ['GET', 'POST'], true)) {
+                throw new ValidationException('"method" must be "GET" or "POST".');
+            }
+            if (isset($decoded['key_header']) && !preg_match('/^[A-Za-z0-9-]{1,60}$/', (string) $decoded['key_header'])) {
+                throw new ValidationException('"key_header" must be a valid header name.');
             }
             $config = json_encode($decoded, JSON_UNESCAPED_SLASHES);
         }
@@ -109,6 +121,17 @@ final class ProviderController extends Controller
         return Response::redirect(admin_url('providers/' . $id . '/edit'));
     }
 
+    private static function normaliseUrl(string $url): string
+    {
+        $url = trim(preg_replace('/\s+/', '', $url) ?? '');
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        // Internationalised domain names: FILTER_VALIDATE_URL only accepts the ASCII (punycode) form.
+        if ($host !== '' && preg_match('/[^\x20-\x7e]/', $host) && function_exists('idn_to_ascii') && ($ascii = idn_to_ascii($host))) {
+            $url = str_replace($host, $ascii, $url);
+        }
+        return $url;
+    }
+
     public function delete(Request $request, int $id): Response
     {
         $db = Database::instance();
@@ -133,7 +156,7 @@ final class ProviderController extends Controller
     public function fetch(Request $request, int $id): Response
     {
         $r = ProviderSyncService::fetchCatalog($id);
-        $this->success("Fetched {$r['count']} services from the provider.");
+        $this->success("Fetched {$r['count']} services from the provider." . ($r['provider_subscriptions'] ? " {$r['provider_subscriptions']} of them are provider-side subscriptions and cannot be imported." : ''));
         return Response::redirect(admin_url('providers/' . $id . '/services'));
     }
 
@@ -180,8 +203,8 @@ final class ProviderController extends Controller
         if (!$ids) {
             throw new ValidationException('Select services to import.');
         }
-        $n = ProviderSyncService::importServices($id, $ids, $request->int('category_id') ?: null, $request->str('markup') ?: '0', $request->bool('auto_sync'), $request->str('category_mode') === 'provider');
-        $this->success("{$n} services imported/updated.");
+        $n = ProviderSyncService::importServices($id, $ids, $request->int('category_id') ?: null, $request->str('markup') ?: '0', $request->bool('auto_sync'), $request->str('category_mode') === 'provider', $skipped);
+        $this->success("{$n} services imported/updated." . ($skipped ? " {$skipped} provider-side \"Subscriptions\" services were skipped: they are billed per new post by the provider, which the API v2 contract does not report. Use a normal service with the Subscriptions service type instead." : ''));
         return $this->back($request, admin_url('providers/' . $id . '/services'));
     }
 

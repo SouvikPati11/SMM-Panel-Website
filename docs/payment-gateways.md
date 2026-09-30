@@ -31,6 +31,24 @@ Guarantees:
 - Amount/currency mismatches are held (not credited) and flagged in Admin → Payments with an email alert.
 - Credentials are encrypted in the database with `APP_KEY` (libsodium) and are write-only in the admin UI.
 
+### Deposit limits (per gateway)
+
+Each gateway has its own **Minimum deposit** and **Maximum deposit** (Admin →
+Payment gateways → edit), for example OxaPay $5, UPI $1, Cryptomus $10. The Add
+funds page shows the selected gateway's limits, and the server enforces them
+for gateway payments and manual payment requests alike. A deposit outside them
+is refused with *"The minimum deposit with <gateway> is $5.00."* and nothing is
+recorded. Amounts accept at most 2 decimals.
+
+**Upgrading from the global setting:** earlier versions combined a global
+*Settings → Funds → Minimum/Maximum deposit* with each gateway's limits
+(effective minimum = the larger of the two, effective maximum = the smaller).
+Migration `2026_10_12_subscription_type_oauth_gateway_limits` writes exactly
+those effective values into every gateway once (guarded by the setting
+`deposit_limits_per_gateway = 1`), so no limit changes at upgrade time. The
+global values stay in the `settings` table but are no longer read or shown.
+Existing payments are not touched.
+
 ### Payments held for review
 
 A payment is held (`needs_review = 1`) when the gateway confirms a different

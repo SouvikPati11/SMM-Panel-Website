@@ -57,7 +57,7 @@ final class BlogController extends Controller
             $this->pageNum($request),
             12
         );
-        $categories = Database::instance()->fetchAll('SELECT c.name, c.slug, COUNT(p.id) AS n FROM blog_categories c JOIN blog_posts p ON p.category_id = c.id AND p.status = \'published\' GROUP BY c.id ORDER BY c.name');
+        $categories = Database::instance()->fetchAll('SELECT c.name, c.slug, COUNT(p.id) AS n FROM blog_categories c JOIN blog_posts p ON p.category_id = c.id AND p.status = \'published\' AND p.published_at <= ? GROUP BY c.id ORDER BY c.name', [now()]);
         $meta = SeoService::meta(['title' => $heading, 'description' => $description, 'robots' => $posts->page > 1 ? 'noindex,follow' : 'index,follow']);
         return $this->view('public/blog/index', compact('posts', 'categories', 'heading', 'description', 'meta'));
     }

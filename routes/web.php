@@ -50,11 +50,20 @@ $router->group(['middleware' => ['maintenance', 'csrf']], static function ($rout
         $router->post('/reset-password/{token}', [AuthController::class, 'reset'], 'password.reset.post', ['throttle:reset,10,600']);
     });
     $router->get('/verify-email/{token}', [AuthController::class, 'verifyEmail'], 'verify.email.token');
+    // Sign in with Google (OAuth 2.0 / OpenID Connect)
+    $router->get('/auth/google', [AuthController::class, 'google'], 'auth.google', ['throttle:oauth,20,600']);
+    $router->get('/auth/google/callback', [AuthController::class, 'googleCallback'], 'auth.google.callback', ['throttle:oauthcb,20,600']);
+    $router->group(['middleware' => ['guest']], static function ($router) {
+        $router->get('/auth/google/complete', [AuthController::class, 'googleCompleteForm'], 'auth.google.complete');
+        $router->post('/auth/google/complete', [AuthController::class, 'googleComplete'], 'auth.google.complete.post', ['throttle:register,5,600']);
+    });
 });
 
 // ------------------------------------------------------------------ user panel
 $router->group(['middleware' => ['maintenance', 'csrf', 'auth']], static function ($router) {
     $router->post('/logout', [AuthController::class, 'logout'], 'logout');
+    $router->post('/account/google/connect', [AuthController::class, 'googleConnect'], 'account.google.connect', ['throttle:oauth,20,600']);
+    $router->post('/account/google/disconnect', [AuthController::class, 'googleDisconnect'], 'account.google.disconnect');
     $router->get('/verify-email', [AuthController::class, 'verifyNotice'], 'verify.notice');
     $router->post('/verify-email/resend', [AuthController::class, 'resendVerification'], 'verify.resend', ['throttle:verify,3,600']);
 

@@ -1,15 +1,30 @@
 <?php $this->extend('layouts/user'); use App\Helpers\Form; ?>
 <div class="page-head"><div><h1>Security</h1><p>Protect your account and your balance.</p></div></div>
 <div class="grid-2">
-  <div class="card"><div class="card-header"><h2>Change password</h2></div><div class="card-body">
+  <?php $noPassword = (int) ($user['password_set'] ?? 1) === 0; ?>
+  <div class="card"><div class="card-header"><h2><?= $noPassword ? 'Set a password' : 'Change password' ?></h2></div><div class="card-body">
+    <?php if ($noPassword): ?><p class="text-sm text-muted mt-0">Your account was created with Google. Set a password to also sign in with your email or username.</p><?php endif ?>
     <form method="post" action="<?= e(url('/account/password')) ?>">
       <?= csrf_field() ?>
-      <?= Form::input('current_password', 'Current password', '', ['type' => 'password', 'required' => true, 'autocomplete' => 'current-password']) ?>
+      <?php if (!$noPassword): ?><?= Form::input('current_password', 'Current password', '', ['type' => 'password', 'required' => true, 'autocomplete' => 'current-password']) ?><?php endif ?>
       <?= Form::input('password', 'New password', '', ['type' => 'password', 'required' => true, 'autocomplete' => 'new-password', 'hint' => 'At least 8 characters with a letter and a number.']) ?>
       <?= Form::input('password_confirmation', 'Confirm new password', '', ['type' => 'password', 'required' => true, 'autocomplete' => 'new-password']) ?>
-      <button class="btn btn-primary" type="submit">Update password</button>
+      <button class="btn btn-primary" type="submit"><?= $noPassword ? 'Set password' : 'Update password' ?></button>
     </form>
   </div></div>
+
+  <?php if ($googleEnabled || $googleAccount): ?>
+  <div class="card"><div class="card-header"><h2>Sign in with Google</h2><?= $googleAccount ? '<span class="badge badge-success">Connected</span>' : '<span class="badge badge-muted">Not connected</span>' ?></div><div class="card-body">
+    <?php if ($googleAccount): ?>
+      <p class="mt-0">Connected to <strong class="break-words"><?= e($googleAccount['email']) ?></strong><?= $googleAccount['last_login_at'] ? ' · last used ' . e(time_ago($googleAccount['last_login_at'])) : '' ?>.</p>
+      <?php if ($noPassword): ?><p class="text-sm text-muted">Set a password before disconnecting, so you can still sign in.</p>
+      <?php else: ?><form method="post" action="<?= e(url('/account/google/disconnect')) ?>" data-confirm="Disconnect Google? You will sign in with your password."><?= csrf_field() ?><button class="btn btn-secondary" type="submit">Disconnect Google</button></form><?php endif ?>
+    <?php else: ?>
+      <p class="mt-0 text-sm text-muted">Sign in with one click using your Google account. You can disconnect it at any time.</p>
+      <form method="post" action="<?= e(url('/account/google/connect')) ?>"><?= csrf_field() ?><button class="btn btn-secondary" type="submit"><?= icon('link') ?> Connect Google</button></form>
+    <?php endif ?>
+  </div></div>
+  <?php endif ?>
 
   <div class="card"><div class="card-header"><h2>Two-factor authentication</h2><?= (int) $user['twofa_enabled'] === 1 ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-muted">Off</span>' ?></div><div class="card-body">
     <?php if ((int) $user['twofa_enabled'] === 1): ?>

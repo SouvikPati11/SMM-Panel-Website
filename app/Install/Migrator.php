@@ -93,8 +93,94 @@ final class Migrator
                     $db->query('INSERT IGNORE INTO settings (`key`, `value`, is_secret, updated_at) VALUES (?, ?, 0, ?)', [$k, $v, now()]);
                 }
             },
+            '2026_10_12_subscription_type_oauth_gateway_limits' => static function (Database $db): void {
+                // --- "Subscriptions" service type (panel-side recurring deliveries) + per-service settings
+                $type = (string) $db->fetchColumn("SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'services' AND column_name = 'type'");
+                if (!str_contains($type, "'subscription'")) {
+                    $db->pdo()->exec("ALTER TABLE services MODIFY type ENUM('default','package','custom_comments','custom_comments_package','mentions_custom_list','comment_likes','poll','keywords','subscription') NOT NULL DEFAULT 'default'");
+                }
+                $cols = [
+                    'subscription_intervals' => 'ADD COLUMN subscription_intervals VARCHAR(100) NULL AFTER subscription_enabled',
+                    'subscription_min_cycles' => 'ADD COLUMN subscription_min_cycles SMALLINT UNSIGNED NULL AFTER subscription_intervals',
+                    'subscription_max_cycles' => 'ADD COLUMN subscription_max_cycles SMALLINT UNSIGNED NULL AFTER subscription_min_cycles',
+                ];
+                foreach ($cols as $col => $ddl) {
+                    if (!self::columnExists($db, 'services', $col)) {
+                        $db->pdo()->exec('ALTER TABLE services ' . $ddl);
+                    }
+                }
+
+                // --- Providers: "syncing" state for catalog/price sync
+                if (!self::columnExists($db, 'providers', 'syncing_since')) {
+                    $db->pdo()->exec('ALTER TABLE providers ADD COLUMN syncing_since DATETIME NULL AFTER last_synced_at');
+                }
+
+                // --- Sign in with Google + remember me
+                if (!self::columnExists($db, 'users', 'password_set')) {
+                    // Existing accounts all chose a password; Google-created accounts start without one.
+                    $db->pdo()->exec('ALTER TABLE users ADD COLUMN password_set TINYINT(1) NOT NULL DEFAULT 1 AFTER password_hash');
+                }
+                $db->pdo()->exec(self::SOCIAL_ACCOUNTS_DDL);
+                $db->pdo()->exec(self::REMEMBER_TOKENS_DDL);
+
+                // --- Registration: "Mobile number ON" now means required unless "optional" is ticked.
+                // Installations that already showed the field as optional keep that behaviour.
+                $mobileOn = $db->fetchColumn("SELECT `value` FROM settings WHERE `key` = 'registration_mobile'") === '1';
+                $wasRequired = $db->fetchColumn("SELECT `value` FROM settings WHERE `key` = 'registration_mobile_required'") === '1';
+                $db->query("INSERT IGNORE INTO settings (`key`, `value`, is_secret, updated_at) VALUES ('registration_mobile_optional', ?, 0, ?)", [$mobileOn && !$wasRequired ? '1' : '0', now()]);
+                foreach (['google_login_enabled' => '0', 'google_client_id' => ''] as $k => $v) {
+                    $db->query('INSERT IGNORE INTO settings (`key`, `value`, is_secret, updated_at) VALUES (?, ?, 0, ?)', [$k, $v, now()]);
+                }
+
+                // --- Deposit limits move from the global setting to each payment gateway.
+                // Each gateway keeps the limit that was effectively enforced: max(global min, gateway min)
+                // and min(global max, gateway max). Runs once (guarded by a settings flag).
+                if ($db->fetchColumn("SELECT `value` FROM settings WHERE `key` = 'deposit_limits_per_gateway'") !== '1') {
+                    // Fallbacks mirror what PaymentService used when the settings rows were absent.
+                    $gMin = (string) ($db->fetchColumn("SELECT `value` FROM settings WHERE `key` = 'min_deposit'") ?: '1');
+                    $gMax = (string) ($db->fetchColumn("SELECT `value` FROM settings WHERE `key` = 'max_deposit'") ?: '100000');
+                    if (\App\Core\Money::isNumeric($gMin)) {
+                        $db->query('UPDATE payment_methods SET min_amount = GREATEST(min_amount, ?)', [$gMin]);
+                    }
+                    if (\App\Core\Money::isNumeric($gMax) && \App\Core\Money::isPositive($gMax)) {
+                        $db->query('UPDATE payment_methods SET max_amount = LEAST(max_amount, ?)', [$gMax]);
+                        $db->query('UPDATE payment_methods SET max_amount = min_amount WHERE max_amount < min_amount');
+                    }
+                    $db->query("INSERT INTO settings (`key`, `value`, is_secret, updated_at) VALUES ('deposit_limits_per_gateway', '1', 0, ?) ON DUPLICATE KEY UPDATE `value` = '1', updated_at = VALUES(updated_at)", [now()]);
+                }
+            },
         ];
     }
+
+    public const SOCIAL_ACCOUNTS_DDL = "CREATE TABLE IF NOT EXISTS user_social_accounts (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id           INT UNSIGNED NOT NULL,
+  provider          VARCHAR(20) NOT NULL,
+  provider_user_id  VARCHAR(191) NOT NULL,
+  email             VARCHAR(190) NULL,
+  created_at        DATETIME NOT NULL,
+  last_login_at     DATETIME NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_social_provider_uid (provider, provider_user_id),
+  UNIQUE KEY uq_social_user_provider (user_id, provider),
+  CONSTRAINT fk_social_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+    public const REMEMBER_TOKENS_DDL = "CREATE TABLE IF NOT EXISTS remember_tokens (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id          INT UNSIGNED NOT NULL,
+  selector         CHAR(24) NOT NULL,
+  token_hash       CHAR(64) NOT NULL,
+  session_version  INT UNSIGNED NOT NULL,
+  user_agent       VARCHAR(255) NULL,
+  expires_at       DATETIME NOT NULL,
+  created_at       DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_remember_selector (selector),
+  KEY idx_remember_user (user_id),
+  KEY idx_remember_expires (expires_at),
+  CONSTRAINT fk_remember_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
     public const SUBSCRIPTIONS_DDL = "CREATE TABLE IF NOT EXISTS subscriptions (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

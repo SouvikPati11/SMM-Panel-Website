@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS users (
   email              VARCHAR(190) NOT NULL,
   mobile             VARCHAR(20) NULL,
   password_hash      VARCHAR(255) NOT NULL,
+  password_set       TINYINT(1) NOT NULL DEFAULT 1,
   name               VARCHAR(100) NULL,
   status             ENUM('active','suspended','banned') NOT NULL DEFAULT 'active',
   email_verified_at  DATETIME NULL,
@@ -67,6 +68,38 @@ CREATE TABLE IF NOT EXISTS users (
   KEY idx_users_referred (referred_by),
   CONSTRAINT fk_users_level FOREIGN KEY (price_level_id) REFERENCES price_levels(id) ON DELETE SET NULL,
   CONSTRAINT fk_users_referrer FOREIGN KEY (referred_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Linked sign-in providers (Google). One row per provider identity.
+CREATE TABLE IF NOT EXISTS user_social_accounts (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id           INT UNSIGNED NOT NULL,
+  provider          VARCHAR(20) NOT NULL,
+  provider_user_id  VARCHAR(191) NOT NULL,
+  email             VARCHAR(190) NULL,
+  created_at        DATETIME NOT NULL,
+  last_login_at     DATETIME NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_social_provider_uid (provider, provider_user_id),
+  UNIQUE KEY uq_social_user_provider (user_id, provider),
+  CONSTRAINT fk_social_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- "Remember me" logins: selector + SHA-256 of the validator; invalidated with the session version.
+CREATE TABLE IF NOT EXISTS remember_tokens (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id          INT UNSIGNED NOT NULL,
+  selector         CHAR(24) NOT NULL,
+  token_hash       CHAR(64) NOT NULL,
+  session_version  INT UNSIGNED NOT NULL,
+  user_agent       VARCHAR(255) NULL,
+  expires_at       DATETIME NOT NULL,
+  created_at       DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_remember_selector (selector),
+  KEY idx_remember_user (user_id),
+  KEY idx_remember_expires (expires_at),
+  CONSTRAINT fk_remember_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- One wallet per user. Balances are ONLY modified by App\Services\WalletService.
@@ -220,6 +253,7 @@ CREATE TABLE IF NOT EXISTS providers (
   last_error        VARCHAR(500) NULL,
   last_checked_at   DATETIME NULL,
   last_synced_at    DATETIME NULL,
+  syncing_since     DATETIME NULL,
   created_at        DATETIME NOT NULL,
   updated_at        DATETIME NOT NULL,
   PRIMARY KEY (id)
@@ -267,7 +301,7 @@ CREATE TABLE IF NOT EXISTS services (
   category_id         INT UNSIGNED NOT NULL,
   name                VARCHAR(255) NOT NULL,
   description         TEXT NULL,
-  type                ENUM('default','package','custom_comments','custom_comments_package','mentions_custom_list','comment_likes','poll','keywords') NOT NULL DEFAULT 'default',
+  type                ENUM('default','package','custom_comments','custom_comments_package','mentions_custom_list','comment_likes','poll','keywords','subscription') NOT NULL DEFAULT 'default',
   link_label          VARCHAR(60) NOT NULL DEFAULT 'Link',
   provider_id         INT UNSIGNED NULL,
   provider_service_id VARCHAR(50) NULL,
@@ -280,6 +314,9 @@ CREATE TABLE IF NOT EXISTS services (
   average_time        VARCHAR(60) NULL,
   dripfeed            TINYINT(1) NOT NULL DEFAULT 0,
   subscription_enabled TINYINT(1) NOT NULL DEFAULT 0,
+  subscription_intervals VARCHAR(100) NULL,
+  subscription_min_cycles SMALLINT UNSIGNED NULL,
+  subscription_max_cycles SMALLINT UNSIGNED NULL,
   refill              TINYINT(1) NOT NULL DEFAULT 0,
   refill_days         SMALLINT UNSIGNED NOT NULL DEFAULT 30,
   cancel              TINYINT(1) NOT NULL DEFAULT 0,

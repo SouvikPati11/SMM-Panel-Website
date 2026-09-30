@@ -9,7 +9,7 @@
 <div class="card">
   <?php if (!$users->items): ?><div class="empty"><?= icon('users') ?><h3>No users found</h3></div><?php else: ?>
   <div class="table-wrap"><table class="table table-cards">
-    <thead><tr><th>ID</th><th>User</th><th class="num">Balance</th><th class="num">Spent</th><th>Level</th><th>Status</th><th>Last login</th><th>Joined</th></tr></thead>
+    <thead><tr><th>ID</th><th>User</th><th class="num">Balance</th><th class="num">Spent</th><th>Level</th><th>Status</th><th>Last login</th><th>Joined</th><?php if (can('users.balance')): ?><th><span class="sr-only">Balance actions</span></th><?php endif ?></tr></thead>
     <tbody><?php foreach ($users->items as $u): ?>
       <tr><td data-label="ID" class="mono"><?= (int) $u['id'] ?></td>
         <td class="cell-main"><a class="cell-title" href="<?= e(admin_url('users/' . $u['id'])) ?>"><?= e($u['username']) ?></a><div class="cell-sub"><?= e($u['email']) ?></div></td>
@@ -18,7 +18,7 @@
         <td data-label="Level"><?= e($u['level'] ?: '—') ?><?= (float) $u['custom_discount'] > 0 ? ' <span class="badge badge-purple no-dot">-' . e($u['custom_discount']) . '%</span>' : '' ?></td>
         <td data-label="Status"><?= status_badge($u['status']) ?></td>
         <td data-label="Last login" class="text-sm nowrap"><?= e(time_ago($u['last_login_at'])) ?></td>
-        <td data-label="Joined" class="text-sm nowrap"><?= e(fmt_date($u['created_at'], 'M j, Y')) ?></td></tr>
+        <td data-label="Joined" class="text-sm nowrap"><?= e(fmt_date($u['created_at'], 'M j, Y')) ?></td><?php if (can('users.balance')): ?><td class="actions"><a class="btn btn-ghost btn-sm" href="<?= e(admin_url('users/' . $u['id'] . '?balance=add')) ?>" title="Add balance" aria-label="Add balance to <?= e($u['username']) ?>"><?= icon('plus') ?></a><a class="btn btn-ghost btn-sm" href="<?= e(admin_url('users/' . $u['id'] . '?balance=remove')) ?>" title="Remove balance" aria-label="Remove balance from <?= e($u['username']) ?>"><?= icon('minus') ?></a></td><?php endif ?></tr>
     <?php endforeach ?></tbody>
   </table></div>
   <div class="flex justify-between items-center wrap" style="padding:0 16px"><span class="text-sm text-muted"><?= e($users->summary()) ?></span><?= $users->links(\App\Core\App::request()) ?></div>

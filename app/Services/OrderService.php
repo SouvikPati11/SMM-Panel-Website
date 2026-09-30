@@ -39,6 +39,9 @@ final class OrderService
         'comment_likes' => ['label' => 'Comment Likes', 'quantity' => true, 'package' => false, 'field' => 'username'],
         'poll' => ['label' => 'Poll', 'quantity' => true, 'package' => false, 'field' => 'answer_number'],
         'keywords' => ['label' => 'Keywords / Search', 'quantity' => true, 'package' => false, 'field' => 'keywords'],
+        // Panel-side recurring deliveries: each delivery is a normal link + quantity order
+        // placed by the "subscriptions" cron task. Only orderable as a subscription.
+        'subscription' => ['label' => 'Subscriptions', 'quantity' => true, 'package' => false, 'subscription' => true],
     ];
 
     // ------------------------------------------------------------------
@@ -199,6 +202,9 @@ final class OrderService
             throw new ValidationException('Your account is not active.');
         }
         $service = self::orderableService($serviceId);
+        if (!empty(self::TYPES[$service['type']]['subscription']) && empty($attach['subscription_id'])) {
+            throw new ValidationException('"' . $service['name'] . '" is a subscription service: order it from the New order page as an auto-subscription.');
+        }
         $params = self::validateInput($service, $input);
         $rate = self::userRate($service, $user);
         $charge = self::computeCharge($service, $rate, $params['quantity'], $params['runs']);

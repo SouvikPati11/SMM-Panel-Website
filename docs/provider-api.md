@@ -27,7 +27,7 @@ returns an error and it is handled like any other rejection.
 ### Adding a provider
 
 Admin → **Providers** → Add provider:
-- **API URL** — copy it exactly from the provider's API page (HTTPS required).
+- **API URL** — copy it exactly from the provider's API page, e.g. `https://smmexporter.in/api/v2`. Spaces and line breaks are removed. HTTPS is required unless you tick *Allow plain HTTP*, which sends the key unencrypted, so use it only for providers without HTTPS.
 - **API key** — stored encrypted; never shown again (only masked).
 - **Currency / exchange rate** — `1 provider unit = X site units`. Used when importing and syncing prices (e.g. provider in USD, site in INR → `83.20`).
 - Save → the connection is tested immediately with `action=balance`.
@@ -60,11 +60,62 @@ defaults:
   "multi_status_param": "orders",
   "multi_status_max": 100,
   "cancel_param": "orders",
-  "extra": {}
+  "extra": {},
+  "key_in": "param",
+  "key_header": "X-Api-Key",
+  "user_agent": ""
 }
 ```
 
+`key_in`: `param` sends the key as a form field (standard). `bearer` sends it as
+`Authorization: Bearer <key>`. `header` sends it in the header named by
+`key_header`. `user_agent` overrides the User-Agent header, for providers whose
+firewall filters on it.
+
 Example — a panel using `api_token` and no multi-status: `{"key_param":"api_token","multi_status":false}`.
+
+### Response formats accepted
+
+Panels that follow the API v2 documentation still differ in small ways. The
+adapter (`App\Providers\ResponseParser`) accepts every unambiguous variant:
+
+- **balance:** `{"balance":"100.84","currency":"USD"}`, a JSON number
+  (`100.84`, `1e-5`), thousands separators (`"1,234.56"`, `"1.234,56"`),
+  currency symbols or codes (`"$12.50"`, `"12.50 USD"`, `"₹ 1,234"`), keys in
+  any case (`Balance`), wrappers (`{"data":{"balance":…}}`,
+  `{"balance":{"amount":…,"currency":…}}`) and a bare number body. The currency
+  comes from `currency`, from the amount text, or defaults to USD.
+- **services:** a JSON list, `{"services":[…]}`/`{"data":[…]}`, or an object
+  keyed by service id. It also accepts `price` for `rate`, `id`/`service_id`
+  for `service`, and numbers with separators or symbols.
+- **Noise:** a UTF-8 BOM or PHP notices printed before the JSON are skipped.
+- **Errors:** `{"error":…}`, `{"errors":…}`, `{"success":false,"message":…}` and
+  `{"status":"fail","message":…}` are reported as provider errors. A bare
+  `{"status":"Fail"}` is an *order* status (it maps to cancelled), not an error.
+
+Provider-side **"Subscriptions"** services (username / min / max / posts /
+delay / expiry, billed by the provider per new post) are fetched into the
+catalog but **not imported**. API v2 reports neither the per-post charges nor a
+subscription status, so they could not be billed correctly. Use a normal
+service with the panel's **Subscriptions** service type instead (see
+`docs/features.md`).
+
+### Troubleshooting
+
+The provider card shows **Connected**, **Error**, **Never checked**,
+**Syncing…** (a catalog fetch is running) or **Disabled**. Errors never include
+the API key: keys are redacted from messages and from **Providers → API
+logs**, which keeps the full response for each call.
+
+| Message | Meaning / fix |
+|---|---|
+| `Unexpected balance response: no numeric "balance" field. Received a JSON object with keys: …` | The provider answered with JSON that has no balance. The listed keys and preview show what it sent. Usually a wrong `action` name (set `actions.balance` in the config) or an account problem on the provider side. The full body is in API logs. |
+| `Provider error: Invalid API key` (or similar) | The provider rejected the key. Re-copy it. Some panels bind keys to an IP, so allow your server's IP. |
+| `The provider returned an HTML page instead of JSON (HTTP 403)` | Wrong URL (usually missing `/api/v2`), or Cloudflare/a firewall blocks server requests. Ask the provider to allow your server IP, or set `user_agent`. |
+| `The API URL redirects (HTTP 301) to https://…` | Enter the final URL shown (often `https://` or `www.`). Redirects are not followed, so the key is never sent to another host. |
+| `Invalid (non-JSON) response, HTTP 500: "…"` | The provider's API is failing. Try again later. |
+| `Network error: …` | DNS, TLS or timeout. Check the domain, or raise *Timeout*. |
+| `Unexpected services response: none of the N items has the API v2 fields service, name and rate` | The panel uses different field names. Contact the provider or use a custom adapter (below). |
 
 ### Status mapping
 

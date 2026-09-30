@@ -7,6 +7,8 @@ namespace App\Core;
 final class Response
 {
     private array $headers = [];
+    /** @var list<array{name:string,value:string,options:array}> */
+    private array $cookies = [];
 
     public function __construct(private string $body = '', private int $status = 200, array $headers = [])
     {
@@ -68,6 +70,19 @@ final class Response
         return $this->headers[$name] ?? null;
     }
 
+    /** @param array{expires?:int,path?:string,secure?:bool,httponly?:bool,samesite?:string} $options */
+    public function withCookie(string $name, string $value, array $options = []): self
+    {
+        $this->cookies[] = ['name' => $name, 'value' => $value, 'options' => $options + ['expires' => 0, 'path' => '/', 'secure' => false, 'httponly' => true, 'samesite' => 'Lax']];
+        return $this;
+    }
+
+    /** @return list<array{name:string,value:string,options:array}> */
+    public function cookies(): array
+    {
+        return $this->cookies;
+    }
+
     public function send(): void
     {
         if (!headers_sent()) {
@@ -75,6 +90,9 @@ final class Response
             header_remove('X-Powered-By');
             foreach ($this->headers as $k => $v) {
                 header($k . ': ' . $v);
+            }
+            foreach ($this->cookies as $c) {
+                setcookie($c['name'], $c['value'], $c['options']);
             }
         }
         echo $this->body;

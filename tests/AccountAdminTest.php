@@ -50,8 +50,9 @@ T::test('Registration: mobile OFF → not required and never stored', function (
     });
 });
 
-T::test('Registration: mobile ON (optional) → validated and normalized when given, may be empty', function () use ($reg, $withSettings) {
-    $withSettings(['registration_mobile' => '1', 'registration_mobile_required' => '0'], function () use ($reg) {
+T::test('Registration: mobile ON + "optional" → validated and normalized when given, may be empty', function () use ($reg, $withSettings) {
+    $withSettings(['registration_mobile' => '1', 'registration_mobile_optional' => '1'], function () use ($reg) {
+        T::eq('optional', AuthService::mobileMode());
         T::true(str_contains(http('GET', '/register')->body(), 'name="mobile"'));
         T::eq(null, $reg()['mobile']);
         T::eq('+447700900123', $reg(['mobile' => '+44 (7700) 900-123'])['mobile']);
@@ -62,15 +63,49 @@ T::test('Registration: mobile ON (optional) → validated and normalized when gi
     });
 });
 
-T::test('Registration: mobile required → empty rejected; switching the field off never breaks existing users', function () use ($reg, $withSettings) {
-    $withSettings(['registration_mobile' => '1', 'registration_mobile_required' => '1'], function () use ($reg) {
-        T::eq('required', AuthService::mobileMode());
+T::test('Registration: mobile ON → required: empty rejected; switching the field off never breaks existing users', function () use ($reg, $withSettings) {
+    $withSettings(['registration_mobile' => '1', 'registration_mobile_optional' => '0'], function () use ($reg) {
+        T::eq('required', AuthService::mobileMode(), 'ON alone means required');
         T::throws(ValidationException::class, fn () => $reg(), 'Enter your mobile');
         T::eq('+15550100123', $reg(['mobile' => '+1 555 010 0123'])['mobile']);
     });
-    $withSettings(['registration_mobile' => '0', 'registration_mobile_required' => '1'], function () use ($reg) {
-        T::eq('off', AuthService::mobileMode(), 'required has no effect while the field is off');
+    $withSettings(['registration_mobile' => '0', 'registration_mobile_optional' => '0'], function () use ($reg) {
+        T::eq('off', AuthService::mobileMode(), 'nothing is required while the field is off');
         T::eq(null, $reg()['mobile']);
+    });
+});
+
+T::test('Registration (HTTP): admin switches Mobile ON/OFF in Settings; the register page and backend follow', function () use ($withSettings, $superId) {
+    $db = Database::instance();
+    $settingsPost = static fn (string $mobile, string $optional) => http('POST', '/' . admin_path() . '/settings', ['_token' => csrf(), 'tab' => 'users', 'registration_enabled' => '1', 'email_verification' => '0',
+        'registration_mobile' => $mobile, 'registration_mobile_optional' => $optional, 'google_login_enabled' => '0', 'google_client_id' => '', 'login_max_attempts' => '5', 'login_lockout_minutes' => '15', 'default_price_level' => '']);
+    $register = static function (string $name, array $extra = []) {
+        App\Services\Auth::logoutUser();
+        return http('POST', '/register', $extra + ['_token' => csrf(), 'username' => $name, 'email' => $name . '@example.com', 'password' => 'Passw0rd99', 'password_confirmation' => 'Passw0rd99', 'terms' => '1'], ['REMOTE_ADDR' => '198.51.100.' . random_int(1, 250)]);
+    };
+    $withSettings(['registration_mobile' => '0', 'registration_mobile_optional' => '0', 'email_verification' => '0'], function () use ($settingsPost, $register, $db, $superId) {
+        login_as_admin($superId);
+        $settingsPost('1', '0');
+        T::eq(['1', '0'], [setting('registration_mobile'), setting('registration_mobile_optional')]);
+        unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
+        App\Services\Auth::logoutUser();
+        $page = http('GET', '/register')->body();
+        T::true((bool) preg_match('/<input[^>]+name="mobile"[^>]+required/', $page), 'field shown and required');
+        $register('mobhttp1');
+        T::eq(null, $db->fetchColumn("SELECT id FROM users WHERE username = 'mobhttp1'"), 'rejected server-side without a number');
+        T::true(str_contains(end($_SESSION['_flash'])['message'] ?? '', 'Enter your mobile number'));
+        $register('mobhttp2', ['mobile' => '+44 7700 900111']);
+        T::eq('+447700900111', $db->fetchColumn("SELECT mobile FROM users WHERE username = 'mobhttp2'"));
+
+        login_as_admin($superId);
+        $settingsPost('0', '0');
+        unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
+        App\Services\Auth::logoutUser();
+        T::true(!str_contains(http('GET', '/register')->body(), 'name="mobile"'), 'field not rendered when OFF');
+        $register('mobhttp3', ['mobile' => '+44 7700 900222']);
+        T::eq([null], [$db->fetchColumn("SELECT mobile FROM users WHERE username = 'mobhttp3'")], 'accepted without a number; a posted number is ignored');
+        T::true((bool) $db->fetchColumn("SELECT id FROM users WHERE username = 'mobhttp3'"));
+        App\Services\Auth::logoutUser();
     });
 });
 

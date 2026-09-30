@@ -42,20 +42,29 @@ final class PaymentService
         return $out;
     }
 
-    /** Validate amount limits (global + method) and return [amount, fee]. */
+    /**
+     * Validate the amount against the selected gateway's own limits and return
+     * [amount, fee]. Limits are per gateway (payment_methods.min_amount /
+     * max_amount); the old global min_deposit/max_deposit settings were folded
+     * into every gateway by migration 2026_10_12 and are no longer read.
+     */
     public static function validateAmount(array $method, string $amountInput): array
     {
-        if (!Money::isNumeric($amountInput)) {
+        $amountInput = trim($amountInput);
+        if (!Money::isNumeric($amountInput) || !Money::isPositive($amountInput)) {
             throw new ValidationException('Enter a valid amount.');
         }
+        if (preg_match('/\.\d{3,}$/', $amountInput) && Money::cmp(Money::of($amountInput, 2), Money::of($amountInput)) !== 0) {
+            throw new ValidationException('Enter the amount with at most 2 decimal places.');
+        }
         $amount = Money::of($amountInput, 2);
-        $min = Money::max((string) setting('min_deposit', '1'), (string) $method['min_amount']);
-        $max = Money::min((string) setting('max_deposit', '100000'), (string) $method['max_amount']);
+        $min = Money::of((string) $method['min_amount'], 2);
+        $max = Money::of((string) $method['max_amount'], 2);
         if (Money::cmp($amount, $min) < 0) {
-            throw new ValidationException('The minimum amount is ' . money($min) . '.');
+            throw new ValidationException('The minimum deposit with ' . $method['name'] . ' is ' . money_base($min) . '.');
         }
         if (Money::cmp($amount, $max) > 0) {
-            throw new ValidationException('The maximum amount is ' . money($max) . '.');
+            throw new ValidationException('The maximum deposit with ' . $method['name'] . ' is ' . money_base($max) . '.');
         }
         $fee = Money::percent($amount, (string) $method['fee_percent'], 2);
         return [$amount, $fee];

@@ -104,9 +104,27 @@ final class ContentController extends Controller
     public function posts(Request $request): Response
     {
         $db = Database::instance();
-        $posts = Paginator::query('p.id, p.title, p.slug, p.status, p.published_at, p.views, c.name AS category', 'FROM blog_posts p LEFT JOIN blog_categories c ON c.id = p.category_id', [], 'p.id DESC', $this->pageNum($request), 30);
+        $where = 'WHERE 1=1';
+        $params = [];
+        $status = $request->str('status');
+        if ($status === 'published') {
+            $where .= " AND p.status = 'published' AND p.published_at <= ?";
+            $params[] = now();
+        } elseif ($status === 'scheduled') {
+            $where .= " AND p.status = 'published' AND p.published_at > ?";
+            $params[] = now();
+        } elseif ($status === 'draft') {
+            $where .= " AND p.status = 'draft'";
+        }
+        $q = mb_substr($request->str('q'), 0, 100);
+        if ($q !== '') {
+            $where .= ' AND (p.title LIKE ? OR p.slug LIKE ?)';
+            array_push($params, Database::like($q), Database::like($q));
+        }
+        $posts = Paginator::query('p.id, p.title, p.slug, p.status, p.published_at, p.updated_at, p.views, p.featured_image, c.name AS category', "FROM blog_posts p LEFT JOIN blog_categories c ON c.id = p.category_id {$where}", $params, 'p.id DESC', $this->pageNum($request), 30);
         $cats = $db->fetchAll('SELECT c.*, (SELECT COUNT(*) FROM blog_posts p WHERE p.category_id = c.id) n FROM blog_categories c ORDER BY name');
-        return $this->view('admin/content/posts', ['title' => 'Blog', 'posts' => $posts, 'cats' => $cats]);
+        $counts = $db->fetch("SELECT COUNT(*) AS all_n, SUM(status = 'published' AND published_at <= ?) AS published, SUM(status = 'published' AND published_at > ?) AS scheduled, SUM(status = 'draft') AS draft FROM blog_posts", [now(), now()]);
+        return $this->view('admin/content/posts', ['title' => 'Blog', 'posts' => $posts, 'cats' => $cats, 'counts' => $counts, 'f' => ['status' => $status, 'q' => $q]]);
     }
 
     public function postForm(Request $request, int $id = 0): Response
@@ -126,9 +144,12 @@ final class ContentController extends Controller
         $id = $request->int('id');
         $existing = $id ? $db->fetch('SELECT * FROM blog_posts WHERE id = ?', [$id]) : null;
         $data = Validator::check($request->post(), ['title' => 'required|max:220', 'excerpt' => 'max:500', 'seo_title' => 'max:200', 'seo_description' => 'max:320']);
-        $slug = slugify($request->str('slug') ?: $data['title']);
+        if ($id && !$existing) {
+            $this->notFound();
+        }
+        $slug = mb_substr(slugify($request->str('slug') ?: $data['title']), 0, 200);
         if ($db->fetchColumn('SELECT id FROM blog_posts WHERE slug = ? AND id <> ?', [$slug, $id])) {
-            throw new ValidationException('Another post already uses this slug.');
+            throw new ValidationException('Another post already uses the address /blog/' . $slug . '. Change the slug.');
         }
         $content = HtmlSanitizer::clean((string) ($request->post()['content'] ?? ''));
         if (trim(strip_tags($content)) === '') {
@@ -137,7 +158,12 @@ final class ContentController extends Controller
         $status = $request->str('status') === 'published' ? 'published' : 'draft';
         $publishedAt = $existing['published_at'] ?? null;
         if ($request->str('published_at') !== '') {
-            $publishedAt = (new \DateTimeImmutable($request->str('published_at'), display_tz()))->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+            $raw = $request->str('published_at');
+            $dt = \DateTimeImmutable::createFromFormat('!Y-m-d\\TH:i', $raw, display_tz()) ?: \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $raw, display_tz());
+            if (!$dt || (int) $dt->format('Y') < 2000 || (int) $dt->format('Y') > 2100) {
+                throw new ValidationException('Enter a valid publish date and time.');
+            }
+            $publishedAt = $dt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
         } elseif ($status === 'published' && !$publishedAt) {
             $publishedAt = now();
         }
@@ -154,12 +180,14 @@ final class ContentController extends Controller
             'published_at' => $publishedAt,
             'updated_at' => now(),
         ];
+        // The old image is deleted only after the post row is saved (see below).
+        $oldImage = null;
         if ($file = $request->file('featured_image')) {
             $row['featured_image'] = UploadService::storePublicImage($file, 'blog');
-            UploadService::deletePublic($existing['featured_image'] ?? null);
+            $oldImage = $existing['featured_image'] ?? null;
         } elseif ($request->bool('remove_image')) {
-            UploadService::deletePublic($existing['featured_image'] ?? null);
             $row['featured_image'] = null;
+            $oldImage = $existing['featured_image'] ?? null;
         }
         $db->transaction(function (Database $db) use (&$id, $existing, $row, $request): void {
             if ($existing) {
@@ -175,9 +203,26 @@ final class ContentController extends Controller
                 $db->query('INSERT IGNORE INTO blog_post_tags (post_id, tag_id) VALUES (?, ?)', [$id, $tid]);
             }
         });
+        UploadService::deletePublic($oldImage);
         AuditService::log('blog.save', 'blog_post', $id, ['status' => $status]);
-        $this->success('Post saved.');
+        $live = $status === 'published' && $publishedAt !== null && $publishedAt <= now();
+        $this->success($status === 'draft' ? 'Draft saved.' : ($live ? 'Post published.' : 'Post scheduled for ' . fmt_date($publishedAt) . '.'));
         return Response::redirect(admin_url('blog/' . $id . '/edit'));
+    }
+
+    /** Publish / unpublish from the list without opening the editor. */
+    public function togglePost(Request $request, int $id): Response
+    {
+        $db = Database::instance();
+        $post = $db->fetch('SELECT id, status, published_at FROM blog_posts WHERE id = ?', [$id]);
+        if (!$post) {
+            $this->notFound();
+        }
+        $publish = $post['status'] !== 'published';
+        $db->update('blog_posts', ['status' => $publish ? 'published' : 'draft', 'published_at' => $publish ? ($post['published_at'] ?: now()) : $post['published_at'], 'updated_at' => now()], ['id' => $id]);
+        AuditService::log($publish ? 'blog.publish' : 'blog.unpublish', 'blog_post', $id);
+        $this->success($publish ? 'Post published.' : 'Post moved back to drafts.');
+        return $this->back($request, admin_url('blog'));
     }
 
     public function deletePost(Request $request, int $id): Response

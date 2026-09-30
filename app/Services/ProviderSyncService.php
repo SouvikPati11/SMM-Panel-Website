@@ -139,7 +139,33 @@ final class ProviderSyncService
         } catch (ProviderException $e) {
             self::markProviderError($providerId, $e->getMessage());
             return ['ok' => false, 'error' => $e->getMessage()];
+        } catch (\Throwable $e) {
+            // Never a blank 500 for the admin: record it, keep details in the log.
+            Logger::error("Provider #{$providerId} balance check crashed: " . $e->getMessage(), ['file' => $e->getFile() . ':' . $e->getLine()], 'provider');
+            self::markProviderError($providerId, 'Internal error while checking the provider (' . get_class($e) . '). Details are in storage/logs/provider-*.log.');
+            return ['ok' => false, 'error' => 'Internal error while checking the provider. Details are in storage/logs/provider-*.log.'];
         }
+    }
+
+    /** Admin-facing state: disabled | syncing | never | error | ok. */
+    public static function displayStatus(array $p): string
+    {
+        if (($p['status'] ?? 'active') === 'disabled') {
+            return 'disabled';
+        }
+        if (!empty($p['syncing_since']) && strtotime($p['syncing_since'] . ' UTC') > time() - 15 * 60) {
+            return 'syncing';
+        }
+        if (($p['connection_status'] ?? 'unknown') === 'unknown' || (empty($p['last_checked_at']) && empty($p['last_synced_at']))) {
+            return 'never';
+        }
+        return $p['connection_status'] === 'error' ? 'error' : 'ok';
+    }
+
+    /** Provider-native "Subscriptions" (username/posts/expiry, billed per post) cannot be charged by this panel. */
+    public static function isProviderSubscriptionType(string $providerType): bool
+    {
+        return in_array(strtolower(preg_replace('/[\s_\-]+/', '', $providerType)), ['subscriptions', 'subscription'], true);
     }
 
     /** Download the provider catalog into provider_services. */
@@ -150,11 +176,16 @@ final class ProviderSyncService
         if (!$provider) {
             throw new ValidationException('Provider not found.');
         }
+        $db->update('providers', ['syncing_since' => now()], ['id' => $providerId]);
         try {
             $services = ProviderFactory::make($provider)->services();
         } catch (ProviderException $e) {
+            $db->update('providers', ['syncing_since' => null], ['id' => $providerId]);
             self::markProviderError($providerId, $e->getMessage());
             throw new ValidationException('Could not fetch services: ' . $e->getMessage());
+        } catch (\Throwable $e) {
+            $db->update('providers', ['syncing_since' => null], ['id' => $providerId]);
+            throw $e;
         }
         $seen = [];
         $db->transaction(static function (Database $db) use ($services, $providerId, &$seen): void {
@@ -174,8 +205,8 @@ final class ProviderSyncService
                 $db->query("UPDATE provider_services SET is_available = 0 WHERE provider_id = ? AND provider_service_id NOT IN ({$placeholders})", array_merge([$providerId], $seen));
             }
         });
-        $db->update('providers', ['last_synced_at' => now(), 'connection_status' => 'ok', 'last_error' => null, 'updated_at' => now()], ['id' => $providerId]);
-        return ['count' => count($services)];
+        $db->update('providers', ['last_synced_at' => now(), 'syncing_since' => null, 'connection_status' => 'ok', 'last_error' => null, 'updated_at' => now()], ['id' => $providerId]);
+        return ['count' => count($services), 'provider_subscriptions' => count(array_filter($services, static fn ($s) => self::isProviderSubscriptionType($s['type'])))];
     }
 
     /**
@@ -229,8 +260,9 @@ final class ProviderSyncService
      * Import selected provider services into the local catalog.
      * @param list<string> $providerServiceIds
      */
-    public static function importServices(int $providerId, array $providerServiceIds, ?int $categoryId, string $markupPercent, bool $autoSync, bool $createCategories): int
+    public static function importServices(int $providerId, array $providerServiceIds, ?int $categoryId, string $markupPercent, bool $autoSync, bool $createCategories, ?int &$skipped = null): int
     {
+        $skipped = 0;
         $db = Database::instance();
         $provider = $db->fetch('SELECT * FROM providers WHERE id = ?', [$providerId]);
         if (!$provider) {
@@ -243,6 +275,10 @@ final class ProviderSyncService
         foreach (array_slice(array_unique($providerServiceIds), 0, 2000) as $psid) {
             $ps = $db->fetch('SELECT * FROM provider_services WHERE provider_id = ? AND provider_service_id = ?', [$providerId, (string) $psid]);
             if (!$ps) {
+                continue;
+            }
+            if (self::isProviderSubscriptionType((string) $ps['type'])) {
+                $skipped++;
                 continue;
             }
             $cat = $categoryId;

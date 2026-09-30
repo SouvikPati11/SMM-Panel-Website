@@ -96,6 +96,8 @@ final class AccountController extends Controller
             'title' => 'Security',
             'user' => $user,
             'secret' => $secret,
+            'googleEnabled' => \App\Services\GoogleAuthService::enabled(),
+            'googleAccount' => \App\Services\GoogleAuthService::linkedAccount((int) $user['id']),
             'otpUri' => $secret ? Totp::uri($secret, $user['email'], site_name()) : null,
             'logins' => $logins,
         ]);
@@ -103,8 +105,9 @@ final class AccountController extends Controller
 
     public function password(Request $request): Response
     {
+        $firstPassword = (int) ($this->user()['password_set'] ?? 1) === 0;
         AuthService::changePassword('user', $this->user(), (string) $request->input('current_password', ''), (string) $request->input('password', ''), (string) $request->input('password_confirmation', ''));
-        $this->success('Password changed. Other sessions have been signed out.');
+        $this->success($firstPassword ? 'Password set. You can now also sign in with your email and password.' : 'Password changed. Other sessions have been signed out.');
         return $this->redirect('/account/security');
     }
 

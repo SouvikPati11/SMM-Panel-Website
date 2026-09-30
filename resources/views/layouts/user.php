@@ -50,7 +50,7 @@ $nav = [
       <button class="icon-btn menu-toggle" type="button" data-nav-toggle aria-controls="sidebar" aria-expanded="false" aria-label="Open menu"><?= icon('menu') ?></button>
       <div class="topbar-title"><?= e($title ?? 'Dashboard') ?></div>
       <div class="spacer"></div>
-      <a class="balance-chip" href="<?= e(url('/funds')) ?>" title="<?= \App\Services\CurrencyService::isConverted() ? e('Balance kept in ' . \App\Services\CurrencyService::base()['code'] . ': ' . money_base($user['balance']) . ' (shown converted)') : 'Add funds' ?>"><?= icon('wallet') ?> <span class="label hide-xs">Balance</span> <span><?= e(money($user['balance'])) ?></span></a>
+      <a class="balance-chip" href="<?= e(url('/funds')) ?>" title="<?= \App\Services\CurrencyService::isConverted() ? e('Balance kept in ' . \App\Services\CurrencyService::base()['code'] . ': ' . money_base($user['balance']) . ' (shown converted)') : 'Add funds' ?>"><?= icon('wallet') ?> <span class="balance-chip-label hide-xs">Balance</span> <span><?= e(money($user['balance'])) ?></span></a>
       <button class="icon-btn hide-xs" type="button" data-theme-toggle aria-label="Toggle dark mode"><?= icon('moon') ?></button>
       <a class="icon-btn" href="<?= e(url('/notifications')) ?>" aria-label="Notifications"><?= icon('bell') ?><?php if ($unread): ?><span class="notif-dot"><?= $unread > 9 ? '9+' : $unread ?></span><?php endif ?></a>
       <details class="dropdown">

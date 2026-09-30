@@ -18,6 +18,7 @@ final class Auth
     private static array|false|null $user = null;
     private static array|false|null $admin = null;
     private static ?array $permissions = null;
+    private static bool $restoring = false;
 
     public static function user(): ?array
     {
@@ -33,6 +34,17 @@ final class Auth
                     self::$user = $row;
                 } else {
                     unset($_SESSION['user_id'], $_SESSION['user_sv']);
+                }
+            } elseif (!self::$restoring && ($req = \App\Core\App::request()) && $req->attribute('session') === true && $req->cookie(RememberService::cookieName())) {
+                // No session yet, but a "remember me" cookie: re-create the session from it.
+                self::$restoring = true;
+                try {
+                    if (RememberService::restore()) {
+                        self::$user = null;
+                        return self::user();
+                    }
+                } finally {
+                    self::$restoring = false;
                 }
             }
         }
@@ -54,6 +66,9 @@ final class Auth
 
     public static function logoutUser(): void
     {
+        if (\App\Core\App::request()) {
+            RememberService::forget();
+        }
         unset($_SESSION['user_id'], $_SESSION['user_sv'], $_SESSION['2fa_pending_user']);
         Session::regenerate();
         self::$user = null;

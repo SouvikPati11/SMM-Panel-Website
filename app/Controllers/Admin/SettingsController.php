@@ -33,7 +33,8 @@ final class SettingsController extends Controller
             'currency_switch_enabled' => 'boolean',
         ],
         'users' => [
-            'registration_enabled' => 'boolean', 'email_verification' => 'boolean', 'registration_mobile' => 'boolean', 'registration_mobile_required' => 'boolean',
+            'registration_enabled' => 'boolean', 'email_verification' => 'boolean', 'registration_mobile' => 'boolean', 'registration_mobile_optional' => 'boolean',
+            'google_login_enabled' => 'boolean', 'google_client_id' => 'max:200|regex:/^[A-Za-z0-9._\-]*$/',
             'login_max_attempts' => 'required|integer|min:3|max:50',
             'login_lockout_minutes' => 'required|integer|min:1|max:1440', 'default_price_level' => 'integer',
         ],
@@ -43,7 +44,8 @@ final class SettingsController extends Controller
             'subscriptions_enabled' => 'boolean', 'subscription_max_cycles' => 'required|integer|min:2|max:1000',
         ],
         'funds' => [
-            'min_deposit' => 'required|decimal|min:0', 'max_deposit' => 'required|decimal|min:1', 'payment_expiry_minutes' => 'required|integer|min:10|max:2880',
+            // Deposit limits are set per gateway (Admin → Payment gateways) since 2026_10_12.
+            'payment_expiry_minutes' => 'required|integer|min:10|max:2880',
         ],
         'referral' => [
             'referral_enabled' => 'boolean', 'referral_percent' => 'required|decimal|min:0|max:50', 'referral_min_withdrawal' => 'required|decimal|min:0', 'referral_same_ip_block' => 'boolean',
@@ -82,9 +84,6 @@ final class SettingsController extends Controller
         if ($tab === 'general' && !in_array($input['timezone'], \DateTimeZone::listIdentifiers(), true)) {
             throw new ValidationException('Select a valid timezone.');
         }
-        if ($tab === 'funds' && Money::cmp($input['max_deposit'], $input['min_deposit']) < 0) {
-            throw new ValidationException('Maximum deposit must be greater than the minimum.');
-        }
         if ($tab === 'general') {
             foreach (['site_logo' => 'logo', 'site_favicon' => 'favicon'] as $key => $field) {
                 if ($file = $request->file($field)) {
@@ -101,13 +100,29 @@ final class SettingsController extends Controller
             // (or emails changed) from now on. See AuthService::needsVerification().
             $input['email_verification_since'] = now();
         }
-        if ($tab === 'users' && $input['registration_mobile'] !== '1') {
-            $input['registration_mobile_required'] = '0';
+        if ($tab === 'users') {
+            // Kept in sync for anything still reading the pre-2026_10_12 key.
+            $input['registration_mobile_required'] = $input['registration_mobile'] === '1' && $input['registration_mobile_optional'] !== '1' ? '1' : '0';
+            $secret = trim((string) ($request->post()['google_client_secret'] ?? ''));
+            if ($secret !== '') {
+                if (strlen($secret) > 200 || preg_match('/\s/', $secret)) {
+                    throw new ValidationException('The Google client secret looks invalid.');
+                }
+                $input['google_client_secret'] = $secret; // encrypted at rest (SettingsService::SECRET_KEYS)
+            } elseif ($request->bool('google_client_secret_clear')) {
+                $input['google_client_secret'] = '';
+            }
+            if ($input['google_login_enabled'] === '1') {
+                SettingsService::setMany(array_intersect_key($input, ['google_client_id' => 1, 'google_client_secret' => 1]));
+                if (!\App\Services\GoogleAuthService::configured()) {
+                    throw new ValidationException('To enable Sign in with Google, enter the Client ID and Client secret (or set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in .env).');
+                }
+            }
         }
         $changed = [];
         foreach ($input as $k => $v) {
             if ((string) setting($k) !== $v) {
-                $changed[$k] = ['from' => setting($k), 'to' => $v];
+                $changed[$k] = in_array($k, SettingsService::SECRET_KEYS, true) ? ['changed' => true] : ['from' => setting($k), 'to' => $v];
             }
         }
         SettingsService::setMany($input);

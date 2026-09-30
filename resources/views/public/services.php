@@ -33,7 +33,7 @@
             <td class="cell-main"><span class="cell-title"><?= e($s['name']) ?></span><?php if ($s['average_time']): ?><div class="cell-sub"><?= icon('clock') ?> <?= e($s['average_time']) ?></div><?php endif ?></td>
             <td data-label="Rate" class="num fw-bold nowrap"><?= e(rate($s['rate'])) ?><span class="text-muted text-xs"><?= $pkg ? ' / pkg' : ' / 1K' ?></span></td>
             <td data-label="Min / Max" class="num nowrap"><?= $pkg ? '—' : number_format((int) $s['min_quantity']) . ' / ' . number_format((int) $s['max_quantity']) ?></td>
-            <td data-label="Features"><span class="svc-flags"><?php if ($s['refill']): ?><span class="badge badge-success no-dot">Refill</span><?php endif ?><?php if ($s['cancel']): ?><span class="badge badge-info no-dot">Cancel</span><?php endif ?><?php if ($s['dripfeed']): ?><span class="badge badge-purple no-dot">Drip-feed</span><?php endif ?></span></td>
+            <td data-label="Features"><span class="svc-flags"><?php if ($s['refill']): ?><span class="badge badge-success no-dot">Refill</span><?php endif ?><?php if ($s['cancel']): ?><span class="badge badge-info no-dot">Cancel</span><?php endif ?><?php if ($s['dripfeed']): ?><span class="badge badge-purple no-dot">Drip-feed</span><?php endif ?><?php if ($s['type'] === 'subscription' || !empty($s['subscription_enabled'])): ?><span class="badge badge-info no-dot"><?= $s['type'] === 'subscription' ? 'Subscription' : 'Auto-repeat' ?></span><?php endif ?></span></td>
             <td class="actions"><a class="btn btn-soft btn-sm" href="<?= e(url('/order?service=' . (int) $s['id'])) ?>">Order</a></td>
           </tr>
         <?php endforeach ?>

@@ -51,10 +51,21 @@
     var msg = form.getAttribute('data-confirm');
     if (msg && !window.confirm(msg)) { e.preventDefault(); return; }
     if (form.hasAttribute('data-no-lock')) return;
-    $$('button[type="submit"], button:not([type])', form).forEach(function (b) {
-      b.classList.add('is-loading');
-      setTimeout(function () { b.classList.remove('is-loading'); }, 8000);
-    });
+    // A second submit of the same form (double click, Enter) is dropped until the page changes.
+    if (form.getAttribute('data-submitting') === '1') { e.preventDefault(); return; }
+    form.setAttribute('data-submitting', '1');
+    var btns = $$('button[type="submit"], button:not([type])', form);
+    btns.forEach(function (b) { b.classList.add('is-loading'); b.setAttribute('aria-busy', 'true'); });
+    setTimeout(function () {
+      form.removeAttribute('data-submitting');
+      btns.forEach(function (b) { b.classList.remove('is-loading'); b.removeAttribute('aria-busy'); });
+    }, 8000);
+  });
+  // Back/forward cache restores the page as it was: unlock forms.
+  window.addEventListener('pageshow', function (e) {
+    if (!e.persisted) return;
+    $$('form[data-submitting]').forEach(function (f) { f.removeAttribute('data-submitting'); });
+    $$('.is-loading').forEach(function (b) { b.classList.remove('is-loading'); b.removeAttribute('aria-busy'); });
   });
   $$('[data-autosubmit]').forEach(function (el) {
     el.addEventListener('change', function () { el.form && el.form.submit(); });
@@ -64,6 +75,88 @@
       $$(master.getAttribute('data-check-all')).forEach(function (c) { c.checked = master.checked; });
     });
   });
+
+  // ------------------------------------------------------------ simple tab switcher (API page examples)
+  $$('[data-api-tab]').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      var group = tab.parentNode;
+      $$('[data-api-tab]', group).forEach(function (t) {
+        var on = t === tab; t.classList.toggle('active', on); t.setAttribute('aria-selected', on ? 'true' : 'false');
+        var panel = document.getElementById(t.getAttribute('data-api-tab')); if (panel) panel.hidden = !on;
+      });
+    });
+  });
+
+  // ------------------------------------------------------------ settings: sub-options follow their parent toggle
+  $$('[data-show-if]').forEach(function (el) {
+    var box = $('input[type="checkbox"][name="' + el.getAttribute('data-show-if') + '"]');
+    if (!box) return;
+    var sync = function () { el.hidden = !box.checked; };
+    box.addEventListener('change', sync); sync();
+  });
+
+  // ------------------------------------------------------------ auth pages: password reveal, rules, loading label
+  $$('.auth-card input[type="password"]').forEach(function (input) {
+    var host = input.parentNode;
+    if (!host.classList.contains('input-icon')) {
+      host = document.createElement('div'); host.className = 'input-icon';
+      input.parentNode.insertBefore(host, input); host.appendChild(input);
+    }
+    host.classList.add('pw-field');
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'pw-toggle'; btn.setAttribute('aria-label', 'Show password'); btn.setAttribute('aria-pressed', 'false');
+    btn.setAttribute('aria-controls', input.id || '');
+    var eye = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+    var off = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+    btn.innerHTML = eye;
+    btn.addEventListener('click', function () {
+      var show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.innerHTML = show ? off : eye;
+      btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+      btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      input.focus();
+    });
+    host.appendChild(btn);
+  });
+  $$('[data-strength]').forEach(function (pw) {
+    var list = $(pw.getAttribute('data-strength')); if (!list) return;
+    var confirm = $('[data-match="#' + pw.id + '"]');
+    function upd() {
+      var v = pw.value, c = confirm ? confirm.value : v;
+      var ok = { len: v.length >= 8, letter: /[A-Za-z]/.test(v), digit: /\d/.test(v), match: v !== '' && v === c };
+      $$('li[data-rule]', list).forEach(function (li) { li.classList.toggle('ok', !!ok[li.getAttribute('data-rule')]); });
+      if (confirm) confirm.setCustomValidity(c !== '' && v !== c ? 'Passwords do not match.' : '');
+    }
+    pw.addEventListener('input', upd); if (confirm) confirm.addEventListener('input', upd); upd();
+  });
+  document.addEventListener('submit', function (e) {
+    if (e.defaultPrevented) return;
+    $$('button[data-loading-text]', e.target).forEach(function (b) {
+      var label = b.querySelector('span') || b;
+      if (!b.hasAttribute('data-label')) b.setAttribute('data-label', label.textContent);
+      label.textContent = b.getAttribute('data-loading-text');
+    });
+  });
+  window.addEventListener('pageshow', function (e) {
+    if (!e.persisted) return;
+    $$('button[data-label]').forEach(function (b) { (b.querySelector('span') || b).textContent = b.getAttribute('data-label'); });
+  });
+
+  // ------------------------------------------------------------ admin service form: subscription settings
+  (function () {
+    var typeSel = $('[data-service-type]'), card = $('#sub-settings'), wrap = $('[data-sub-toggle]');
+    if (!typeSel || !card) return;
+    var toggle = wrap && $('input[type="checkbox"]', wrap);
+    function sync() {
+      var isType = typeSel.value === 'subscription';
+      if (wrap) wrap.hidden = isType;
+      card.hidden = !(isType || (toggle && toggle.checked));
+    }
+    typeSel.addEventListener('change', sync);
+    if (toggle) toggle.addEventListener('change', sync);
+    sync();
+  })();
 
   // ------------------------------------------------------------ copy to clipboard
   $$('[data-copy]').forEach(function (btn) {
@@ -107,6 +200,7 @@
             }
             var f = d.querySelector('[name="' + k + '"]');
             if (!f) return;
+            if (f.type === 'radio') { $$('[name="' + k + '"]', d).forEach(function (r) { r.checked = r.value === String(data[k]); }); return; }
             if (f.type === 'checkbox') f.checked = !!Number(data[k]) || data[k] === true;
             else f.value = data[k] == null ? '' : data[k];
           });
@@ -121,6 +215,8 @@
   $$('[data-close-dialog]').forEach(function (btn) {
     btn.addEventListener('click', function () { var d = btn.closest('dialog'); if (d) d.close(); });
   });
+  // Deep links such as ?balance=add open the matching dialog once the page is ready.
+  $$('[data-click-on-load]').forEach(function (b) { b.click(); });
 
   // ------------------------------------------------------------ exact decimal helpers (BigInt micro-units)
   var SCALE = 1000000n;
@@ -174,6 +270,126 @@
   var currencyEl = $('#currency-config');
   if (currencyEl) { try { window.__currency = JSON.parse(currencyEl.textContent); } catch (e) {} }
 
+  // ------------------------------------------------------------ rich select (progressive enhancement)
+  // Wraps a native <select>: the select stays in the form (and is what gets submitted);
+  // a button + listbox shows icons, a second line, a price and badges from data-* attributes.
+  // opt.icon(option) → HTML for the leading icon. Options with hidden/disabled are skipped.
+  function richSelect(select, opt) {
+    opt = opt || {};
+    var uid = 'rs' + Math.random().toString(36).slice(2, 8);
+    var wrap = document.createElement('div'); wrap.className = 'rs';
+    var trigger = document.createElement('button');
+    trigger.type = 'button'; trigger.className = 'rs-trigger';
+    trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
+    var lbl = select.id && document.querySelector('label[for="' + select.id + '"]');
+    if (lbl) { lbl.id = lbl.id || uid + '-label'; trigger.setAttribute('aria-labelledby', lbl.id + ' ' + uid + '-value'); lbl.addEventListener('click', function (e) { e.preventDefault(); trigger.focus(); }); }
+    var panel = document.createElement('div'); panel.className = 'rs-panel'; panel.hidden = true;
+    var searchBox = null;
+    if (opt.search) {
+      searchBox = document.createElement('input');
+      searchBox.type = 'search'; searchBox.className = 'input rs-search'; searchBox.placeholder = opt.search; searchBox.setAttribute('aria-label', opt.search);
+      searchBox.setAttribute('aria-controls', uid + '-list'); searchBox.autocomplete = 'off';
+      panel.appendChild(searchBox);
+    }
+    var list = document.createElement('ul'); list.className = 'rs-list'; list.id = uid + '-list'; list.setAttribute('role', 'listbox'); list.tabIndex = -1;
+    if (lbl) list.setAttribute('aria-labelledby', lbl.id);
+    panel.appendChild(list);
+    select.parentNode.insertBefore(wrap, select);
+    wrap.appendChild(select); wrap.appendChild(trigger); wrap.appendChild(panel);
+    select.classList.add('rs-native'); select.tabIndex = -1; select.setAttribute('aria-hidden', 'true');
+    var items = [], active = -1;
+
+    function content(o, forTrigger) {
+      var d = o.dataset, html = '';
+      if (opt.icon) html += '<span class="rs-icon">' + opt.icon(o) + '</span>';
+      html += '<span class="rs-text"><span class="rs-title"' + (forTrigger ? ' id="' + uid + '-value"' : '') + '></span>';
+      if (d.sub) html += '<span class="rs-sub"></span>';
+      html += '</span>';
+      if (d.badge || d.meta) html += '<span class="rs-side">' + (d.meta ? '<span class="rs-meta"></span>' : '') + (d.badge ? '<span class="rs-badge"></span>' : '') + '</span>';
+      return html;
+    }
+    function fill(el, o) {
+      el.innerHTML = content(o, el === trigger);
+      $('.rs-title', el).textContent = o.getAttribute('data-title') || o.textContent;
+      if (o.dataset.sub) $('.rs-sub', el).textContent = o.dataset.sub;
+      if (o.dataset.meta) $('.rs-meta', el).textContent = o.dataset.meta;
+      if (o.dataset.badge) $('.rs-badge', el).textContent = o.dataset.badge;
+    }
+    function renderTrigger() {
+      var o = select.options[select.selectedIndex];
+      if (o && !o.disabled) { fill(trigger, o); trigger.classList.remove('is-empty'); }
+      else { trigger.innerHTML = '<span class="rs-text"><span class="rs-title rs-placeholder" id="' + uid + '-value"></span></span>'; $('.rs-title', trigger).textContent = opt.empty || 'Nothing to choose'; trigger.classList.add('is-empty'); }
+      trigger.disabled = !items.length && !select.options.length;
+    }
+    function build() {
+      list.innerHTML = ''; items = [];
+      var q = searchBox ? searchBox.value.trim().toLowerCase() : '';
+      Array.prototype.forEach.call(select.options, function (o) {
+        if (o.hidden || o.disabled) return;
+        if (q && (o.textContent + ' ' + (o.dataset.sub || '') + ' ' + o.value).toLowerCase().indexOf(q) < 0) return;
+        var li = document.createElement('li');
+        li.className = 'rs-option'; li.setAttribute('role', 'option'); li.id = uid + '-o' + o.value;
+        li.setAttribute('aria-selected', o.selected ? 'true' : 'false');
+        fill(li, o);
+        li.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        li.addEventListener('click', function () { choose(o.value); });
+        list.appendChild(li); items.push({ li: li, o: o });
+      });
+      if (!items.length) {
+        var empty = document.createElement('li'); empty.className = 'rs-empty'; empty.setAttribute('role', 'presentation');
+        empty.textContent = q ? 'No matches for “' + q + '”' : (opt.empty || 'Nothing to choose');
+        list.appendChild(empty);
+      }
+      setActive(Math.max(0, items.findIndex(function (it) { return it.o.selected; })));
+    }
+    function setActive(i) {
+      if (!items.length) { active = -1; list.removeAttribute('aria-activedescendant'); return; }
+      active = Math.max(0, Math.min(items.length - 1, i));
+      items.forEach(function (it, k) { it.li.classList.toggle('is-active', k === active); });
+      list.setAttribute('aria-activedescendant', items[active].li.id);
+      if (searchBox) searchBox.setAttribute('aria-activedescendant', items[active].li.id);
+      var li = items[active].li, top = li.offsetTop, bottom = top + li.offsetHeight;
+      if (top < list.scrollTop) list.scrollTop = top; else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
+    }
+    function open() {
+      if (!panel.hidden || trigger.disabled) return;
+      if (searchBox) searchBox.value = '';
+      build(); panel.hidden = false; wrap.classList.add('is-open'); trigger.setAttribute('aria-expanded', 'true');
+      (searchBox || list).focus();
+      setActive(active);
+    }
+    function close(focusTrigger) {
+      if (panel.hidden) return;
+      panel.hidden = true; wrap.classList.remove('is-open'); trigger.setAttribute('aria-expanded', 'false');
+      if (focusTrigger) trigger.focus();
+    }
+    function choose(value) {
+      var changed = select.value !== String(value);
+      select.value = value; renderTrigger(); close(true);
+      if (changed) select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    function keys(e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
+      else if (e.key === 'Home' && !searchBox) { e.preventDefault(); setActive(0); }
+      else if (e.key === 'End' && !searchBox) { e.preventDefault(); setActive(items.length - 1); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (items[active]) choose(items[active].o.value); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(true); }
+      else if (e.key === 'Tab') { close(false); }
+    }
+    trigger.addEventListener('click', function () { panel.hidden ? open() : close(true); });
+    trigger.addEventListener('keydown', function (e) { if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    list.addEventListener('keydown', keys);
+    if (searchBox) { searchBox.addEventListener('keydown', keys); searchBox.addEventListener('input', function () { build(); }); }
+    document.addEventListener('mousedown', function (e) { if (!wrap.contains(e.target)) close(false); });
+    select.addEventListener('change', renderTrigger);
+    var api = { refresh: function () { if (!panel.hidden) build(); renderTrigger(); }, open: open, close: close };
+    new MutationObserver(function () { api.refresh(); }).observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'disabled'] });
+    select._rich = api;
+    renderTrigger();
+    return api;
+  }
+
   // ------------------------------------------------------------ new order form
   var orderForm = $('#order-form');
   if (orderForm) {
@@ -216,12 +432,18 @@
       var c = catById[catId];
       setIcon($('#category-icon'), c ? c.p : 'other');
       data.services.filter(function (s) { return String(s.c) === String(catId); }).forEach(function (s) {
-        var o = document.createElement('option');
+        var o = document.createElement('option'), price = rateFmt(toMicro(s.r)) + (s.pk ? '' : ' / 1K');
         o.value = s.id;
-        o.textContent = s.id + ' — ' + s.n + ' — ' + rateFmt(toMicro(s.r)) + (s.pk ? '' : ' / 1000') + (s.sb ? ' · Subscription' : '');
+        o.textContent = s.id + ' — ' + s.n + ' — ' + price + (s.sb ? ' · Subscription' : ''); // native fallback
+        o.setAttribute('data-title', s.n);
+        o.setAttribute('data-sub', '#' + s.id + (s.pk ? ' · Package' : ' · Min ' + Number(s.mi).toLocaleString() + ' · Max ' + Number(s.ma).toLocaleString()) + (s.rf ? ' · Refill' : ''));
+        o.setAttribute('data-meta', price);
+        if (s.sb) o.setAttribute('data-badge', s.so ? 'Subscription' : 'Auto-repeat');
         svcSel.appendChild(o);
       });
       if (selectId) svcSel.value = selectId;
+      if (catSel._rich) catSel._rich.refresh();
+      if (svcSel._rich) svcSel._rich.refresh();
       onService();
     }
 
@@ -235,16 +457,30 @@
       $('#svc-max').textContent = s.pk ? '—' : Number(s.ma).toLocaleString();
       $('#svc-time').textContent = s.t || '—';
       var flags = $('#svc-flags'); flags.innerHTML = '';
-      [[s.rf, 'Refill'], [s.cn, 'Cancel'], [s.df, 'Drip-feed'], [s.sb, 'Subscription']].forEach(function (f) {
+      [[s.rf, 'Refill'], [s.cn, 'Cancel'], [s.df, 'Drip-feed'], [s.sb, s.so ? 'Subscription only' : 'Subscription']].forEach(function (f) {
         if (!f[0]) return;
         var b = document.createElement('span'); b.className = 'badge badge-success'; b.textContent = f[1]; flags.appendChild(b);
       });
       linkLabel.textContent = s.l || 'Link';
       link.placeholder = s.lt === 'url' ? 'https://' : (s.l || '');
       var type = s.ty;
-      show('field-order-type', !!s.sb);
-      if (!s.sb) { var one = $('input[name="order_type"][value="single"]'); if (one) one.checked = true; }
-      show('field-quantity', ['default', 'comment_likes', 'poll', 'keywords'].indexOf(type) >= 0);
+      // Order type: one-time / subscription toggle; "Subscriptions" services are subscription-only.
+      show('field-order-type', !!s.sb && !s.so);
+      var forceType = !s.sb ? 'single' : (s.so ? 'subscription' : null);
+      if (forceType) { var r = $('input[name="order_type"][value="' + forceType + '"]'); if (r) r.checked = true; }
+      var subInt = $('#sub_interval'), subCyc = $('#sub_cycles');
+      if (s.sb && subInt) {
+        var allowed = s.si || [], firstOk = null;
+        $$('option', subInt).forEach(function (o) { var ok = allowed.indexOf(o.value) >= 0; o.hidden = !ok; o.disabled = !ok; if (ok && firstOk === null) firstOk = o.value; });
+        if (subInt.selectedOptions[0] && subInt.selectedOptions[0].disabled) subInt.value = allowed.indexOf('24') >= 0 ? '24' : firstOk;
+      }
+      if (s.sb && subCyc) {
+        subCyc.min = s.smi; subCyc.max = s.sma;
+        var v = parseInt(subCyc.value, 10) || 0;
+        if (v < s.smi || v > s.sma) subCyc.value = Math.min(Math.max(v, s.smi), s.sma);
+        $('#sub-cycles-hint').textContent = s.smi + '–' + s.sma + ' deliveries';
+      }
+      show('field-quantity', ['default', 'comment_likes', 'poll', 'keywords', 'subscription'].indexOf(type) >= 0);
       show('field-comments', type === 'custom_comments' || type === 'custom_comments_package');
       show('field-usernames', type === 'mentions_custom_list');
       show('field-username', type === 'comment_likes');
@@ -451,6 +687,10 @@
       });
     }
 
+    // Rich pickers: platform icons, prices, min/max and badges in the lists (native selects stay in the form).
+    richSelect(catSel, { icon: function (o) { return icons[o.getAttribute('data-platform')] || icons.other || ''; }, search: 'Search categories', empty: 'No categories for this platform' });
+    richSelect(svcSel, { search: 'Search services in this category', empty: 'No services in this category' });
+
     // initial state
     var pre = orderForm.getAttribute('data-preselect');
     if (pre && byId[pre]) { catSel.value = byId[pre].c; fillServices(byId[pre].c, pre); }
@@ -483,6 +723,13 @@
       });
       $$('.method-id').forEach(function (i) { i.value = id; });
       $$('.method-card').forEach(function (c) { c.classList.toggle('active', c.getAttribute('data-method') === id); });
+      // Deposit limits belong to the selected gateway (the server enforces the same values).
+      var amt = gwForm && $('input[name="amount"]', gwForm);
+      if (amt && sel) {
+        amt.min = sel.getAttribute('data-min'); amt.max = sel.getAttribute('data-max');
+        amt.placeholder = sel.getAttribute('data-min');
+        var hint = $('#gw-limits'); if (hint) hint.textContent = sel.getAttribute('data-limits') || '';
+      }
     };
     radios.forEach(function (r) { r.addEventListener('change', sync); });
     sync();

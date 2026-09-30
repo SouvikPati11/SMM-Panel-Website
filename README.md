@@ -287,6 +287,18 @@ threshold, so nobody is auto-promoted.
 - converts the global deposit minimum/maximum into each gateway's own limits,
   keeping the effective values ([details](docs/payment-gateways.md#deposit-limits-per-gateway)).
 
+`2026_10_20_post_subscriptions_price_protection_gateway_bonus` adds:
+
+- post-based subscriptions (subscription style, allowed delays, old posts and
+  expiry limits on services; reserve/settlement columns on subscriptions;
+  existing services and subscriptions stay *scheduled*);
+- provider price protection (`service_price_events`, blocked/disabled flags,
+  mode and margin settings; default mode *Protection only*);
+- per-gateway deposit bonus (terms on gateways, snapshots on payments and
+  manual requests);
+- a platform per category, filled once from the category name;
+- reCAPTCHA and TikTok settings (reCAPTCHA OFF by default).
+
 Without SSH, use **Admin → System health → Apply database
 upgrades**, which runs the same migrations.
 
@@ -401,7 +413,7 @@ php tests/run.php            # all suites
 php tests/run.php Payment    # one suite
 ```
 
-The suite drops and recreates every table in the test database, then runs 204
+The suite drops and recreates every table in the test database, then runs 241
 integration tests through the real services and the full HTTP kernel, with a
 fake HTTP transport standing in for providers and gateways:
 
@@ -417,15 +429,19 @@ fake HTTP transport standing in for providers and gateways:
 | Cron | lsphp/php-cgi command-line detection, CLI binary recommendation, task failure recording + log, lock-held skip, overlapping schedulers, interrupted runs, exit codes 0/1/2/3, missing-extension failure, diagnostics, URL trigger |
 | Accounts & admin | mobile field off/optional/required, email verification on/off with expiring single-use tokens, resend and grandfathering, balance add/remove ledger + audit + idempotency + permissions, order status transitions and idempotent refunds |
 | Currency & levels | exact display conversion, admin validation, per-user choice never converting stored values, base currency in admin/funds, deposit thresholds (credited only, no double count, pending/held/failed/rejected excluded), manual override, safe migration |
-| Order page & SEO | platform detection, server-side quote, JSON confirm, double submit, homepage headings/alt/meta/OG/Twitter/JSON-LD, canonical, robots/sitemap consistency, X-Robots-Tag on private pages |
+| Order page & SEO | platform card grid from the configured category platform, admin platform setting, "Before you order" removed, platform detection, server-side quote, JSON confirm, double submit, homepage headings/alt/meta/OG/Twitter/JSON-LD, canonical, robots/sitemap consistency, X-Robots-Tag on private pages |
 | Providers | balance/services parsing of every unambiguous API v2 variant (strings, numbers, separators, symbols, wrappers, BOM/notice noise), diagnostics without the key (errors + redacted logs), HTML/redirect/empty/status-message errors, bearer-key mode, provider states, admin add/edit (HTTPS opt-in, key kept), provider-side "Subscriptions" imported as post-based subscription services |
 | Subscription type | admin create with intervals/min/max, subscription-only enforcement (web, mass, API), schedule limits, cron delivery as a standard API v2 `add` |
+| Post subscriptions | admin config, every server-side limit (username, posts, old posts, min/max, delay, expiry), tampered POSTs, reserve charge, exact API v2 payload, idempotency, status sync + settlement with/without provider charge, expired, provider rejection, cancel (queued, accepted, unsupported, forced), manual expiry by cron with **4 concurrent processes → one refund** |
+| Price protection | safe price with margin + largest discount, unchanged/decrease/increase/large increase, protect/auto/disable/off, manual prices, auto-sync markup, existing orders untouched, order-time guard for discounted users, unavailable/failed sync, admin settings and page |
+| Gateway bonus | exact calculation, OxaPay/Cryptomus/P2Gateway/manual independently, terms snapshot, duplicate callbacks, unpaid/underpaid/rejected, tampered POST, admin validation |
+| reCAPTCHA | OFF (no widget/call), ON widget + CSP, login/sign-up refused on missing/invalid/replayed token, v3 score/action, Google unreachable (fail closed), CSRF first, Google OAuth unaffected, encrypted masked secret |
 | Google & remember me | state/nonce/PKCE, forged or replayed state, aud/iss/exp/nonce/email_verified checks, new user completion with mobile/terms, verified-email linking vs pre-hijacking refusal, 2FA/suspension, connect/disconnect, encrypted secret; remember-me cookie hashing, restore, rotation, theft/version/logout invalidation |
 | Deposits & content | per-gateway min/max (service, HTTP, admin), one-time migration of the global limits, blog admin (validation, scheduling, publish toggle, public visibility, permissions), API Access page (key shown once, no cross-user leak), admin balance controls |
 
 Also verified manually during development: every public, customer and admin
 page renders without PHP/JS errors, with no horizontal overflow at 360, 390,
-430, 768 and 1366 px; the order form's live price matches the server; the
+412, 430, 768 and 1366 px (the order page with touch emulation); the order form's live price matches the server; the
 installer runs end-to-end and locks itself; cron scripts run and skip
 overlapping runs; and against a real Apache the `.htaccess` rules return 403 for
 `.env`, `.git`, `app/`, `storage/`, `cron/`, `database/`, `composer.json`,
@@ -504,9 +520,12 @@ and database backed up · `TRUSTED_PROXIES` set if you use Cloudflare.
 - Page/blog editing is a raw HTML textarea (sanitised), not a WYSIWYG editor.
 - One base (accounting) currency per site; changing it later does not convert
   existing balances. Other currencies are display-only, with admin-set rates.
-- Auto-subscriptions are panel-side (repeated normal orders). Provider-native
-  "Subscriptions" services (billed per new post) are not supported: the standard
-  API v2 documents no billing or status format for them.
+- Post-based subscriptions rely on the provider reporting `posts` and/or
+  `charge` in its API v2 status; if it reports neither, the reserve is settled
+  from the processed posts known to the panel, or refunded in full when none are
+  reported. Tested against a fake provider only.
+- reCAPTCHA and the gateway bonus with real gateways were tested against fake
+  Google / gateway endpoints; a live check with real keys is needed.
 - Charts are simple server-rendered SVG (no JS charting library).
 - Deposits are refunded to the balance, never back to the original payment method (no payout integrations).
 - The demo catalog seeder (`tests/dev-seed.php`) is for local previews only.

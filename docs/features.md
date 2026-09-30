@@ -1,4 +1,4 @@
-# Subscriptions, currencies, price levels, registration and admin controls
+# Subscriptions, pricing, deposits, registration and admin controls
 
 ## Auto-subscriptions
 
@@ -46,12 +46,44 @@ hours, daily, every 2 or 3 days, or weekly, for 2 up to *Maximum deliveries*
 - **Orders list:** subscription orders are marked *Subscription #id · delivery
   n*, and both the user and admin order lists can be filtered by type.
 
-**Limitation:** provider-native "Subscriptions" services, the kind with
-username/min/max/posts/delay/expiry parameters that are billed per new post,
-are not used. The standard API v2 contract this panel implements documents
-neither per-post billing nor a subscription status format, so charging for them
-safely is not possible. Panel-side subscriptions work with every existing
-service and provider.
+### Post-based subscriptions (provider "Subscriptions")
+
+The *Subscriptions* service type has a **Subscription style**: *Scheduled*
+(above) or **Post-based**, the API v2 "Subscriptions" contract where the
+provider watches an account and delivers to each new post. Provider services of
+type "Subscriptions" are imported as post-based services automatically.
+
+- **Order fields:** Username, New posts, Old posts, Quantity per post
+  (Min – Max), Delay and Expiry, shown as one card on New order.
+- **Admin settings per service:** allowed delays, minimum/maximum new posts,
+  maximum old posts (0 = not offered), maximum expiry in days, and the per-post
+  quantity limits (Min/Max quantity). Settings → Orders keeps the global
+  switch.
+- **Validation (server-side only):** username (no spaces, `@` stripped), posts
+  and old posts in range, min ≤ max within the service limits, delay from the
+  allowed list, expiry in the future and within the maximum (default: the
+  maximum). A tampered POST is refused with the same messages; quotes and
+  orders are computed on the server.
+- **Charging:** the maximum possible cost, *max × (new + old posts) × price per
+  1000*, is **reserved** from the balance when the subscription is created
+  (one ledger entry, idempotent per form key). The provider receives a standard
+  API v2 `add` with `username, min, max, posts, old_posts, delay, expiry` (no
+  link or quantity).
+- **Tracking:** the `status` sync reads the provider's `posts` count and
+  status (Active, Paused, Completed, Expired, Canceled).
+- **Settlement (exactly once):** when the provider reports a final status, when
+  a manual service reaches its expiry (cron), or when a cancelled or expired
+  provider subscription has had no final status for 48 hours, the used amount
+  is charged (provider charge converted at the service price, or processed
+  posts × max × price) and the rest of the reserve is refunded through the
+  order's refund path. The row lock plus the `final_charge IS NULL` guard make
+  concurrent cron runs, status syncs and admin actions settle once.
+- **Cancel:** before the order reaches the provider it is cancelled with a full
+  refund; at the provider, a cancel request is sent (services with *Cancel
+  available*) and settled when the provider confirms. Admins can
+  *Force cancel* (settle now) or record processed posts for manual services.
+- **Failure:** if the provider rejects the subscription, the whole reserve is
+  refunded and the subscription is marked *failed*.
 
 ## Display currencies
 
@@ -141,16 +173,72 @@ ledger references, so they never run twice.
 
 ## New order page
 
-- Platform shortcuts (only platforms that have services) filter the categories.
-  Categories and search results show platform icons.
+- **Platform cards:** a 2-column grid of large cards (All, Instagram, TikTok,
+  YouTube, Facebook, X, Telegram, Spotify, Threads, VK, Twitch, Other), each
+  with its icon and service count, and a search box. Selecting a card filters
+  the categories and services and shows a clear active state. The platform
+  comes from **Admin → Categories → Platform**; *Auto-detect* uses the category
+  name, and existing categories were filled once by the 2026_10_20 migration.
+  Platforms without their own card (Discord, LinkedIn…) appear under *Other*.
+  No service IDs are hard-coded.
+- **No automatic keyboard:** opening the Category or Service picker focuses the
+  list, not its search box, so phones do not pop up the keyboard. The keyboard
+  appears only when the search box is tapped. With a keyboard, the arrow keys,
+  Enter and Escape work, and typing jumps into the search box.
+- The "Before you order" box was removed; the help links are under the submit
+  button.
 - A loading state appears while a description or the price is fetched. Price
   requests are debounced and superseded, and stale answers are ignored.
 - **Review order** fetches a server-side quote and opens a confirmation dialog
-  showing the service, link, quantity, rate, total (or subscription schedule)
+  showing the service, link, quantity, rate, total (or subscription details)
   and service notes. **Confirm** places the order, and a success state shows
   the order number.
 - Double submission is blocked in the browser (busy state) and on the server
   (idempotency key per form).
+
+## Provider price protection
+
+Settings → Orders → **Provider price protection** keeps services from selling
+below the provider's cost.
+
+- **Safe price** = cost × (1 + margin%) ÷ (1 − largest discount%), where the
+  largest discount is the highest price-level or custom user discount. Even the
+  most discounted user then pays at least cost + margin.
+- **Modes:** *Protection only* (default) blocks ordering of an unsafe service
+  and never changes prices; *Auto-adjust* raises the selling price to the safe
+  price (never lowers it, so manual prices above it are kept); *Disable
+  service* switches it off and back on once safe; *Off* only records costs.
+- **When:** every provider price sync (cron, *Fetch services*, *Sync prices*),
+  every admin save of a service, and when the settings change. Auto-sync
+  services are repriced from their markup first.
+- **Order-time guard:** every order (web, mass, API, subscriptions) re-checks
+  the user's actual price against cost + margin on the server.
+- **Existing orders** keep their stored price and charge.
+- **Admin → Services → Price changes** lists services needing attention and the
+  full history (cost up/down, repriced, blocked, disabled, unblocked). Actions
+  are audited and the admin is notified.
+
+## Deposit bonus per gateway
+
+Admin → Payment gateways → *Deposit bonus*: **Bonus %**, **Fixed bonus** and
+an optional **Minimum deposit for bonus**, set independently for each gateway.
+
+- The terms are copied onto the payment (or manual request) when it is
+  created, so later edits do not change payments in progress.
+- The bonus is calculated on the server from the confirmed amount (the approved
+  amount for manual payments) and credited in the same transaction as the
+  deposit, as its own ledger entry `payment:{id}:gwbonus`. Duplicate callbacks,
+  cron re-checks and concurrent approvals never credit it twice. Unpaid,
+  underpaid, rejected or failed payments get nothing.
+- Add funds shows each method's bonus and, as the amount is typed, the expected
+  bonus and total. The server ignores any bonus values sent by the browser.
+
+## Footer social links
+
+Settings → Contact: Facebook, Instagram, X, YouTube, Telegram and TikTok URLs.
+Only configured networks appear, as icon buttons with accessible labels,
+opening in a new tab (`rel="noopener noreferrer"`). Values that are not http(s)
+URLs are never rendered.
 
 ## Remember me
 

@@ -94,11 +94,17 @@ adapter (`App\Providers\ResponseParser`) accepts every unambiguous variant:
   `{"status":"Fail"}` is an *order* status (it maps to cancelled), not an error.
 
 Provider-side **"Subscriptions"** services (username / min / max / posts /
-delay / expiry, billed by the provider per new post) are fetched into the
-catalog but **not imported**. API v2 reports neither the per-post charges nor a
-subscription status, so they could not be billed correctly. Use a normal
-service with the panel's **Subscriptions** service type instead (see
-`docs/features.md`).
+delay / expiry) are imported as **post-based Subscriptions services**. The
+panel sends `action=add` with `username, min, max, posts, old_posts, delay,
+expiry` (expiry as `d/m/Y`), reserves the maximum cost, reads `posts`,
+`charge` and the status (`Active`, `Paused`, `Completed`, `Expired`,
+`Canceled`) from `action=status`, and settles the reserve once (see
+`docs/features.md` → Post-based subscriptions).
+
+**Price protection:** each price sync also compares the provider's new cost
+with the previous one and applies Settings → Orders → *Provider price
+protection* (block, auto-adjust or disable services that would sell below cost
++ margin). The events are listed in Admin → Services → Price changes.
 
 ### Troubleshooting
 

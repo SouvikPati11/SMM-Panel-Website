@@ -238,7 +238,7 @@ final class SubscriptionService
                     'posts' => ['link' => $p['username'], 'quantity' => $p['max'] * ($p['posts'] + $p['old_posts']), 'extra' => $extra, 'charge' => $reserve, 'rate' => $rate],
                 ]);
                 $db->update('subscriptions', ['last_order_id' => (int) $order['id'], 'last_run_at' => now()], ['id' => $subId]);
-                self::log($subId, 'created', null, (int) $order['id'], sprintf('%d new + %d old posts, %s–%s per post, delay %s%s — reserved %s', $p['posts'], $p['old_posts'], number_format($p['min']), number_format($p['max']), strtolower(self::DELAYS[$p['delay']]), $p['expiry'] ? ', expires ' . $p['expiry'] : '', $reserve), 'user');
+                self::log($subId, 'created', null, (int) $order['id'], sprintf('%d new + %d old posts, %s–%s per post, delay %s%s — reserved %s', $p['posts'], $p['old_posts'], number_format($p['min']), number_format($p['max']), strtolower(self::DELAYS[$p['delay']]), $p['expiry'] ? ', expires ' . $p['expiry'] : '', money_base($reserve)), 'user');
                 return [$subId, (int) $order['id']];
             });
         } catch (\PDOException $e) {
@@ -339,7 +339,7 @@ final class SubscriptionService
                 'cancelled_at' => $final === 'cancelled' ? ($sub['cancelled_at'] ?? now()) : $sub['cancelled_at'],
                 'updated_at' => now(),
             ], ['id' => $subId]);
-            self::log($subId, $final, (int) $sub['completed_cycles'], $order ? (int) $order['id'] : null, trim(($reason !== '' ? $reason . ' — ' : '') . "charged {$used} of the {$reserve} reserve, refunded " . Money::sub($reserve, $used)), $actor);
+            self::log($subId, $final, (int) $sub['completed_cycles'], $order ? (int) $order['id'] : null, trim(($reason !== '' ? $reason . ' — ' : '') . "charged " . money_base($used) . ' of the ' . money_base($reserve) . ' reserve, refunded ' . money_base(Money::sub($reserve, $used))), $actor);
             $notify = [(int) $sub['user_id'], "Subscription #{$subId} {$final}", Money::isPositive($refund) ? 'The unused part of your reserve (' . money($refund) . ') has been returned to your balance.' : 'Your subscription has finished.'];
             return $done;
         });

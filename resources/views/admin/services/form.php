@@ -8,7 +8,7 @@
       <?= Form::input('name', 'Name', $s['name'] ?? '', ['required' => true, 'maxlength' => 255]) ?>
       <div class="form-grid">
         <?= Form::select('category_id', 'Category', $categories, (string) ($s['category_id'] ?? ''), ['required' => true]) ?>
-        <?= Form::select('type', 'Service type', $types, $s['type'] ?? 'default', ['hint' => 'Controls which fields the order form shows. <strong>Subscriptions</strong> = repeated deliveries on a schedule.', 'attrs' => ['data-service-type' => '']]) ?>
+        <?= Form::select('type', 'Service type', $types, $s['type'] ?? 'default', ['hint' => 'Controls which fields the order form shows. <strong>Subscriptions</strong> = auto-subscriptions: post-based (username, new/old posts) or repeated deliveries on a schedule.', 'attrs' => ['data-service-type' => '']]) ?>
       </div>
       <?= Form::textarea('description', 'Description (shown on the order form)', $s['description'] ?? '', ['rows' => 6, 'hint' => 'Plain text. Mention start time, speed, quality, requirements.']) ?>
       <div class="form-grid">

@@ -49,6 +49,17 @@ those effective values into every gateway once (guarded by the setting
 global values stay in the `settings` table but are no longer read or shown.
 Existing payments are not touched.
 
+### Deposit bonus (per gateway)
+
+Each gateway can give a bonus: **Bonus %** of the deposit plus an optional
+**Fixed bonus**, only for deposits of at least **Minimum deposit for bonus**
+(empty or 0 means every deposit). The terms are copied onto the payment when it
+is created. The bonus is credited by `PaymentService::complete()`, the same
+single idempotent crediting path, as a separate `bonus` ledger entry with the
+unique reference `payment:{id}:gwbonus`, so duplicate or concurrent callbacks
+never credit it twice. It is shown on Add funds before paying, and it is never
+calculated from browser input.
+
 ### Payments held for review
 
 A payment is held (`needs_review = 1`) when the gateway confirms a different

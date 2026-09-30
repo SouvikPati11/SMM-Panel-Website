@@ -32,9 +32,9 @@ $postOrder = $posts && $orders ? $orders[0] : null; ?>
       <dt>Per delivery</dt><dd><?= e(money($perDelivery)) ?> at the user's current price · spent <?= e(money($spent)) ?> · balance <?= e(money($user['balance'])) ?></dd>
       <?php endif ?>
     </dl></div></div>
-    <div class="card mb-2"><div class="card-header"><h2>Deliveries (orders)</h2></div><div class="table-wrap"><table class="table table-cards">
-      <thead><tr><th>Delivery</th><th>Order</th><th class="num">Charge</th><th>Status</th><th>Placed</th></tr></thead><tbody>
-      <?php foreach ($orders as $o): ?><tr><td data-label="Delivery" class="mono">#<?= (int) $o['subscription_cycle'] ?></td><td data-label="Order"><a class="mono" href="<?= e(admin_url('orders/' . $o['id'])) ?>">#<?= (int) $o['id'] ?></a><?= $o['provider_order_id'] ? ' <span class="cell-sub mono">' . e($o['provider_order_id']) . '</span>' : '' ?></td><td data-label="Charge" class="num nowrap"><?= e(money($o['charge'])) ?></td><td data-label="Status"><?= status_badge($o['status']) ?></td><td data-label="Placed" class="text-sm nowrap"><?= e(fmt_date($o['created_at'])) ?></td></tr><?php endforeach ?>
+    <div class="card mb-2"><div class="card-header"><h2><?= $posts ? 'Provider order' : 'Deliveries (orders)' ?></h2></div><div class="table-wrap"><table class="table table-cards">
+      <thead><tr><th><?= $posts ? 'Type' : 'Delivery' ?></th><th>Order</th><th class="num">Charge</th><th>Status</th><th>Placed</th></tr></thead><tbody>
+      <?php foreach ($orders as $o): ?><tr><td data-label="<?= $posts ? 'Type' : 'Delivery' ?>"><?= $posts ? 'Subscription' : '<span class="mono">#' . (int) $o['subscription_cycle'] . '</span>' ?></td><td data-label="Order"><a class="mono" href="<?= e(admin_url('orders/' . $o['id'])) ?>">#<?= (int) $o['id'] ?></a><?= $o['provider_order_id'] ? ' <span class="cell-sub mono">' . e($o['provider_order_id']) . '</span>' : '' ?></td><td data-label="Charge" class="num nowrap"><?= e(money($o['charge'])) ?></td><td data-label="Status"><?= status_badge($o['status']) ?></td><td data-label="Placed" class="text-sm nowrap"><?= e(fmt_date($o['created_at'])) ?></td></tr><?php endforeach ?>
       <?php if (!$orders): ?><tr><td colspan="5" class="text-muted text-center">No deliveries yet.</td></tr><?php endif ?>
     </tbody></table></div></div>
     <div class="card"><div class="card-header"><h2>History</h2></div><div class="card-body"><ul class="timeline">

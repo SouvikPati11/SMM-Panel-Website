@@ -46,74 +46,71 @@ $sections = [
   "currency": "' . e(setting('currency_code', 'USD')) . '"
 }'],
 ];
+$sections = array_map(static fn ($s) => ['id' => slugify($s[1]), 'action' => $s[0], 'title' => $s[1], 'params' => $s[2], 'response' => $s[3]], $sections);
+$php = "<?php\n\$ch = curl_init('" . $endpoint . "');\ncurl_setopt_array(\$ch, [\n    CURLOPT_POST => true,\n    CURLOPT_RETURNTRANSFER => true,\n    CURLOPT_POSTFIELDS => http_build_query([\n        'key'      => 'YOUR_API_KEY',\n        'action'   => 'add',\n        'service'  => " . $sid . ",\n        'link'     => 'https://instagram.com/example',\n        'quantity' => 1000,\n    ]),\n]);\n\$order = json_decode(curl_exec(\$ch), true);\necho \$order['order'] ?? \$order['error'];";
+$curl = "curl -X POST " . $endpoint . " \\\n  -d key=YOUR_API_KEY \\\n  -d action=balance";
+$python = "import requests\n\nr = requests.post('" . $endpoint . "', data={\n    'key': 'YOUR_API_KEY',\n    'action': 'status',\n    'order': 23501,\n})\nprint(r.json())";
+/** Code block with its own horizontal scroll and a copy button. */
+$code = static fn (string $label, string $text, string $lang = '') => '<div class="code-block"><div class="code-block-head"><span>' . e($label) . '</span><button class="btn btn-ghost btn-sm code-copy" type="button" data-copy="' . e($text) . '" aria-label="Copy ' . e($label) . '">' . icon('copy') . ' <span class="copy-label">Copy</span></button></div><pre tabindex="0"' . ($lang ? ' data-lang="' . e($lang) . '"' : '') . '><code>' . e($text) . '</code></pre></div>';
 ?>
-<section class="page-hero">
+<section class="page-hero api-hero">
   <div class="container">
     <ol class="breadcrumb"><li><a href="<?= e(url('/')) ?>">Home</a></li><li>API</li></ol>
     <h1>API documentation</h1>
     <p>Our API follows the widely used SMM panel API v2 format, so existing panel scripts and client libraries work without changes.</p>
   </div>
 </section>
-<div class="container">
-  <div class="grid-main-wide">
-    <div>
-      <div class="card mb-2"><div class="card-body">
-        <dl class="dl">
-          <dt>API URL</dt><dd><div class="copy-box"><span id="api-url"><?= e($endpoint) ?></span><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($endpoint) ?>"><?= icon('copy') ?></button></div></dd>
-          <dt>HTTP method</dt><dd><code>POST</code> (GET is also accepted)</dd>
-          <dt>Content type</dt><dd><code>application/x-www-form-urlencoded</code> or JSON</dd>
-          <dt>Response format</dt><dd>JSON</dd>
-          <dt>API key</dt><dd><?php if (auth_user()): ?><a href="<?= e(url('/account/api')) ?>">Generate your key</a><?php else: ?><a href="<?= e(url('/register')) ?>">Create an account</a> to get an API key<?php endif ?></dd>
-          <dt>Rate limit</dt><dd><?= (int) setting('api_rate_limit', 60) ?> requests per <?= (int) setting('api_rate_window', 60) ?> seconds per key (HTTP 429 when exceeded)</dd>
-        </dl>
-      </div></div>
+<div class="container api-docs">
+  <div class="card mb-2 api-overview"><div class="card-body">
+    <div class="field mb-0"><div class="label">API URL</div>
+      <div class="copy-box copy-box-lg"><code id="api-url" class="break-all"><?= e($endpoint) ?></code><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($endpoint) ?>" aria-label="Copy API URL"><?= icon('copy') ?> <span class="copy-label">Copy</span></button></div>
+    </div>
+    <dl class="api-facts">
+      <div><dt>HTTP method</dt><dd><code>POST</code> <span class="text-muted">(GET also accepted)</span></dd></div>
+      <div><dt>Content type</dt><dd><code>application/x-www-form-urlencoded</code> or JSON</dd></div>
+      <div><dt>Response</dt><dd>JSON</dd></div>
+      <div><dt>Rate limit</dt><dd><?= (int) setting('api_rate_limit', 60) ?> requests / <?= (int) setting('api_rate_window', 60) ?> s per key <span class="text-muted">(HTTP 429)</span></dd></div>
+      <div><dt>API key</dt><dd><?php if (auth_user()): ?><a href="<?= e(url('/account/api')) ?>">Generate your key</a><?php else: ?><a href="<?= e(url('/register')) ?>">Create an account</a> to get a key<?php endif ?></dd></div>
+    </dl>
+  </div></div>
 
-      <?php foreach ($sections as [$action, $title, $params, $response]): ?>
-      <div class="card mb-2" id="<?= e(slugify($title)) ?>">
-        <div class="card-header"><h2><?= e($title) ?></h2><code>action=<?= e($action) ?></code></div>
-        <div class="table-wrap">
-          <table class="table"><thead><tr><th>Parameter</th><th>Description</th></tr></thead><tbody>
-            <?php foreach ($params as $p => $d): ?><tr><td class="mono nowrap"><?= e($p) ?></td><td><?= e($d) ?></td></tr><?php endforeach ?>
-          </tbody></table>
+  <nav class="api-nav" aria-label="API methods">
+    <?php foreach ($sections as $sec): ?><a class="api-nav-link" href="#<?= e($sec['id']) ?>"><?= e($sec['title']) ?></a><?php endforeach ?>
+    <a class="api-nav-link" href="#errors">Errors</a><a class="api-nav-link" href="#examples">Examples</a>
+  </nav>
+
+  <div class="api-layout">
+    <div class="api-main">
+      <?php foreach ($sections as $sec): ?>
+      <section class="card mb-2 api-method" id="<?= e($sec['id']) ?>" aria-labelledby="<?= e($sec['id']) ?>-title">
+        <div class="card-header api-method-head"><h2 id="<?= e($sec['id']) ?>-title"><?= e($sec['title']) ?></h2><code class="api-action">action=<?= e($sec['action']) ?></code></div>
+        <div class="card-body">
+          <div class="label">Parameters</div>
+          <dl class="api-params">
+            <?php foreach ($sec['params'] as $p => $d): ?><div class="api-param"><dt><code><?= e($p) ?></code></dt><dd><?= e($d) ?></dd></div><?php endforeach ?>
+          </dl>
+          <?= $code('Example response', $sec['response'], 'json') ?>
         </div>
-        <div class="card-body"><div class="label">Example response</div><pre><code><?= e($response) ?></code></pre></div>
-      </div>
+      </section>
       <?php endforeach ?>
 
-      <div class="card mb-2"><div class="card-header"><h2>Errors</h2></div><div class="card-body">
+      <section class="card mb-2" id="errors" aria-labelledby="errors-title"><div class="card-header"><h2 id="errors-title">Errors</h2></div><div class="card-body">
         <p>Errors are returned as <code>{"error": "message"}</code> with an appropriate HTTP status:</p>
-        <ul>
-          <li><code>401</code> — invalid or missing API key</li>
-          <li><code>400</code> / <code>422</code> — invalid parameters (e.g. <code>Incorrect service ID</code>, quantity out of range, <code>Not enough funds on balance</code>)</li>
-          <li><code>429</code> — rate limit exceeded; retry after the window resets</li>
-          <li><code>403</code> — API access disabled for the account</li>
+        <ul class="api-errors">
+          <li><code>401</code> Invalid or missing API key</li>
+          <li><code>400</code> / <code>422</code> Invalid parameters (e.g. <code>Incorrect service ID</code>, quantity out of range, <code>Not enough funds on balance</code>)</li>
+          <li><code>429</code> Rate limit exceeded; retry after the window resets</li>
+          <li><code>403</code> API access disabled for the account</li>
         </ul>
         <p class="mb-0">Order statuses: <code>Pending</code>, <code>Processing</code>, <code>In progress</code>, <code>Completed</code>, <code>Partial</code>, <code>Canceled</code>. Undelivered quantity of partial and cancelled orders is refunded to your balance automatically.</p>
-      </div></div>
+      </div></section>
     </div>
 
-    <aside class="sticky-side">
-      <div class="card mb-2"><div class="card-header"><h3>PHP example</h3></div><div class="card-body">
-<pre><code>&lt;?php
-$ch = curl_init('<?= e($endpoint) ?>');
-curl_setopt_array($ch, [
-    CURLOPT_POST =&gt; true,
-    CURLOPT_RETURNTRANSFER =&gt; true,
-    CURLOPT_POSTFIELDS =&gt; http_build_query([
-        'key'      =&gt; 'YOUR_API_KEY',
-        'action'   =&gt; 'add',
-        'service'  =&gt; <?= $sid ?>,
-        'link'     =&gt; 'https://instagram.com/example',
-        'quantity' =&gt; 1000,
-    ]),
-]);
-$order = json_decode(curl_exec($ch), true);
-echo $order['order'] ?? $order['error'];</code></pre>
-      </div></div>
-      <div class="card"><div class="card-header"><h3>cURL example</h3></div><div class="card-body">
-<pre><code>curl -X POST <?= e($endpoint) ?> \
-  -d key=YOUR_API_KEY \
-  -d action=balance</code></pre>
+    <aside class="api-side" id="examples" aria-label="Code examples">
+      <div class="card mb-2"><div class="card-header"><h2>Examples</h2></div><div class="card-body api-examples">
+        <?= $code('PHP', $php, 'php') ?>
+        <?= $code('cURL', $curl, 'bash') ?>
+        <?= $code('Python', $python, 'python') ?>
       </div></div>
     </aside>
   </div>

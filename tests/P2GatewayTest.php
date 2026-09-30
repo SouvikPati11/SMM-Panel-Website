@@ -470,3 +470,24 @@ T::test('P2G: not offered unless configured and the site currency matches', func
     $db->update('payment_methods', ['config' => json_encode(['account_currency' => 'USD'])], ['id' => $p2gMethod]);
     T::true(GatewayRegistry::make($db->fetch('SELECT * FROM payment_methods WHERE id = ?', [$p2gMethod]))->isImplemented());
 });
+
+T::test('P2G bonus: gateway bonus credited once after the verified status; repeated webhooks and cron add nothing', function () use ($newPayment, $webhook, $credits, $p2gMethod) {
+    $db = Database::instance();
+    $db->update('payment_methods', ['bonus_percent' => '3', 'bonus_fixed' => '2', 'bonus_min_amount' => '100'], ['id' => $p2gMethod]);
+    P2G::install();
+    P2G::createOk();
+    [$u, $p] = $newPayment('200');
+    P2G::status('COMPLETED', 'SUCCESS', '200');
+    $webhook(['order_id' => $p['merchant_order_id']]);
+    $webhook(['order_id' => $p['merchant_order_id'], 'status' => 'SUCCESS']);
+    PaymentService::verifyPending();
+    T::eq('208.000000', Fx::balance((int) $u['id']), '200 + 3% + 2');
+    T::eq(1, $credits((int) $u['id']));
+    T::eq(1, (int) $db->fetchColumn("SELECT COUNT(*) FROM transactions WHERE payment_id = ? AND type = 'bonus'", [$p['id']]));
+    // Below the gateway's bonus minimum.
+    [$u2, $p2] = $newPayment('50');
+    P2G::status('COMPLETED', 'SUCCESS', '50');
+    $webhook(['order_id' => $p2['merchant_order_id']]);
+    T::eq('50.000000', Fx::balance((int) $u2['id']));
+    $db->update('payment_methods', ['bonus_percent' => '0', 'bonus_fixed' => '0', 'bonus_min_amount' => '0'], ['id' => $p2gMethod]);
+});

@@ -48,6 +48,7 @@
   // ------------------------------------------------------------ forms: confirm + double-submit guard
   document.addEventListener('submit', function (e) {
     var form = e.target;
+    if (e.defaultPrevented) return; // e.g. the reCAPTCHA step below held the submit back
     var msg = form.getAttribute('data-confirm');
     if (msg && !window.confirm(msg)) { e.preventDefault(); return; }
     if (form.hasAttribute('data-no-lock')) return;
@@ -129,6 +130,29 @@
       if (confirm) confirm.setCustomValidity(c !== '' && v !== c ? 'Passwords do not match.' : '');
     }
     pw.addEventListener('input', upd); if (confirm) confirm.addEventListener('input', upd); upd();
+  });
+  // reCAPTCHA (only rendered while enabled in Admin → Settings → Users). The server verifies the
+  // token; this only avoids a round trip for an unticked box and fetches the invisible v3 token.
+  $$('form[data-auth-form]').forEach(function (form) {
+    var v2 = $('.g-recaptcha', form), v3 = $('[data-recaptcha-v3]', form), err = $('[data-recaptcha-error]', form);
+    if (!v2 && !v3) return;
+    form.addEventListener('submit', function (e) {
+      if (v2) {
+        var ok = window.grecaptcha && window.grecaptcha.getResponse && window.grecaptcha.getResponse() !== '';
+        if (err) err.hidden = !!ok;
+        if (!ok) { e.preventDefault(); }
+        return;
+      }
+      if (v3.value) return; // token fetched: let the form go
+      e.preventDefault();
+      if (!window.grecaptcha || !window.grecaptcha.ready) { form.submit(); return; } // server answers with a clear error
+      window.grecaptcha.ready(function () {
+        window.grecaptcha.execute(v3.getAttribute('data-recaptcha-v3'), { action: v3.getAttribute('data-recaptcha-action') }).then(function (token) {
+          v3.value = token;
+          if (form.requestSubmit) form.requestSubmit(); else form.submit();
+        }, function () { form.submit(); });
+      });
+    });
   });
   document.addEventListener('submit', function (e) {
     if (e.defaultPrevented) return;
@@ -361,7 +385,10 @@
       if (!panel.hidden || trigger.disabled) return;
       if (searchBox) searchBox.value = '';
       build(); panel.hidden = false; wrap.classList.add('is-open'); trigger.setAttribute('aria-expanded', 'true');
-      (searchBox || list).focus();
+      // Focus the list, never the search box: on phones focusing an input opens the on-screen
+      // keyboard. The keyboard appears only when the user taps the search box; on desktop,
+      // typing while the list has focus moves the keystrokes into the search box (typeahead).
+      list.focus({ preventScroll: true });
       setActive(active);
     }
     function close(focusTrigger) {
@@ -385,7 +412,15 @@
     }
     trigger.addEventListener('click', function () { panel.hidden ? open() : close(true); });
     trigger.addEventListener('keydown', function (e) { if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
-    list.addEventListener('keydown', keys);
+    list.addEventListener('keydown', function (e) {
+      if (searchBox && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== ' ') {
+        e.preventDefault();
+        searchBox.value += e.key; searchBox.focus(); build();
+        return;
+      }
+      if (searchBox && e.key === 'Backspace' && searchBox.value) { e.preventDefault(); searchBox.value = searchBox.value.slice(0, -1); searchBox.focus(); build(); return; }
+      keys(e);
+    });
     if (searchBox) { searchBox.addEventListener('keydown', keys); searchBox.addEventListener('input', function () { build(); }); }
     document.addEventListener('mousedown', function (e) { if (!wrap.contains(e.target)) close(false); });
     select.addEventListener('change', renderTrigger);
@@ -443,12 +478,13 @@
     function setIcon(el, key) { if (el) el.innerHTML = icons[key] || icons.other || ''; }
 
     // --- platform shortcuts: filter categories (and therefore services) by platform
+    // Cards filter by platform group (a card per main platform, everything else under "Other").
     function applyPlatform(p) {
       platform = p;
-      $$('.platform-chip').forEach(function (b) { var on = b.getAttribute('data-platform') === p; b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+      $$('.pf-card').forEach(function (b) { var on = b.getAttribute('data-platform') === p; b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
       var first = null;
       $$('option', catSel).forEach(function (o) {
-        var ok = !p || o.getAttribute('data-platform') === p;
+        var ok = !p || o.getAttribute('data-group') === p;
         o.hidden = !ok; o.disabled = !ok;
         if (ok && first === null) first = o.value;
       });
@@ -456,7 +492,15 @@
       if (!cur || cur.disabled) { catSel.value = first; }
       fillServices(catSel.value);
     }
-    $$('.platform-chip').forEach(function (b) { b.addEventListener('click', function () { applyPlatform(b.getAttribute('data-platform')); }); });
+    $$('.pf-card').forEach(function (b) { b.addEventListener('click', function () { applyPlatform(b.getAttribute('data-platform')); }); });
+    var platformSearch = $('#platform-search');
+    if (platformSearch) {
+      platformSearch.addEventListener('input', function () {
+        var q = platformSearch.value.trim().toLowerCase(), shown = 0;
+        $$('.pf-card').forEach(function (b) { var ok = !q || (b.getAttribute('data-name') || '').indexOf(q) >= 0; b.hidden = !ok; if (ok) shown++; });
+        show('pf-empty', shown === 0);
+      });
+    }
 
     function fillServices(catId, selectId) {
       svcSel.innerHTML = '';
@@ -735,10 +779,11 @@
           b.querySelector('strong').textContent = s.id + ' — ' + s.n;
           b.querySelector('small').textContent = (cat ? cat.n + ' · ' : '') + rateFmt(toMicro(s.r)) + (s.pk ? '' : ' per 1000');
           b.addEventListener('click', function () {
-            if (platform && cat && cat.p !== platform) applyPlatform('');
+            if (platform && cat && cat.g !== platform) applyPlatform('');
             catSel.value = s.c; fillServices(s.c, s.id);
             results.hidden = true; search.value = '';
-            link.focus();
+            // Touch screens: hide the keyboard instead of jumping into the next input.
+            if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) search.blur(); else link.focus();
           });
           results.appendChild(b);
         });
@@ -789,8 +834,34 @@
         var hint = $('#gw-limits'); if (hint) hint.textContent = sel.getAttribute('data-limits') || '';
       }
     };
-    radios.forEach(function (r) { r.addEventListener('change', sync); });
+    // Expected gateway bonus (preview only: the server calculates and credits it on confirmation).
+    var cents = function (v) { var n = parseFloat(v); return isFinite(n) ? Math.round(n * 100) : 0; };
+    var bonusPreview = function () {
+      var sel = radios.filter(function (r) { return r.checked; })[0];
+      $$('.bonus-preview').forEach(function (out) {
+        var form = out.closest('form');
+        var amt = form && $('input[name="amount"]', form);
+        var pct = sel && sel.getAttribute('data-bonus-pct');
+        if (!amt || !pct) { out.hidden = true; return; }
+        var a = cents(amt.value), fixed = cents(sel.getAttribute('data-bonus-fixed')), min = sel.getAttribute('data-bonus-min');
+        var sym = (($('.input-prefix', form) || {}).textContent || '');
+        var fmt = function (c) { return sym + (c / 100).toFixed(2); };
+        if (a <= 0) { out.hidden = true; return; }
+        out.hidden = false;
+        if (min && a < cents(min)) {
+          out.className = 'bonus-preview bonus-preview-muted';
+          out.textContent = 'Deposit ' + fmt(cents(min)) + ' or more to get the deposit bonus.';
+          return;
+        }
+        var bonus = Math.floor(a * parseFloat(pct) / 100) + fixed;
+        out.className = 'bonus-preview';
+        out.textContent = 'Deposit bonus: +' + fmt(bonus) + ' — you receive ' + fmt(a + bonus) + ' in total.';
+      });
+    };
+    $$('input[name="amount"]', fundsForm).forEach(function (i) { i.addEventListener('input', bonusPreview); });
+    radios.forEach(function (r) { r.addEventListener('change', sync); r.addEventListener('change', bonusPreview); });
     sync();
+    bonusPreview();
     $$('[data-coupon-check]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var form = btn.closest('form');

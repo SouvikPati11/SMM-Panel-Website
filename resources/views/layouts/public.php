@@ -84,11 +84,16 @@ $footerPages = db()->fetchAll("SELECT slug, title FROM pages WHERE status = 'pub
     </div>
     <div class="footer-bottom">
       <span>&copy; <?= date('Y') ?> <?= e(site_name()) ?>. All rights reserved.</span>
-      <span class="flex gap-2 wrap">
-        <?php foreach (['social_facebook' => 'Facebook', 'social_instagram' => 'Instagram', 'social_x' => 'X', 'social_youtube' => 'YouTube', 'social_telegram' => 'Telegram'] as $k => $label): if (setting($k)): ?>
-          <a href="<?= e(setting($k)) ?>" rel="noopener" target="_blank"><?= e($label) ?></a>
-        <?php endif; endforeach ?>
-      </span>
+      <?php $socials = [];
+      foreach (['social_facebook' => ['Facebook', 'facebook'], 'social_instagram' => ['Instagram', 'instagram'], 'social_x' => ['X', 'x-brand'], 'social_youtube' => ['YouTube', 'youtube'], 'social_telegram' => ['Telegram', 'telegram'], 'social_tiktok' => ['TikTok', 'tiktok']] as $k => [$label, $ic]) {
+          $link = trim((string) setting($k, ''));
+          if ($link !== '' && preg_match('#^https?://#i', $link)) { // only configured, well-formed links
+              $socials[] = [$link, $label, $ic];
+          }
+      } ?>
+      <?php if ($socials): ?><ul class="footer-social" aria-label="Follow us">
+        <?php foreach ($socials as [$link, $label, $ic]): ?><li><a class="social-link" href="<?= e($link) ?>" target="_blank" rel="noopener noreferrer" aria-label="<?= e(site_name() . ' on ' . $label . ' (opens in a new tab)') ?>" title="<?= e($label) ?>"><?= icon($ic) ?></a></li><?php endforeach ?>
+      </ul><?php endif ?>
     </div>
   </div>
 </footer>

@@ -14,16 +14,19 @@ use App\Core\Totp;
 use App\Services\Auth;
 use App\Services\AuthService;
 use App\Services\GoogleAuthService;
+use App\Services\RecaptchaService;
 
 final class AuthController extends Controller
 {
     public function loginForm(Request $request): Response
     {
-        return $this->view('auth/login', ['title' => 'Sign in', 'google' => GoogleAuthService::enabled()]);
+        return $this->withCaptcha($this->view('auth/login', ['title' => 'Sign in', 'google' => GoogleAuthService::enabled(), 'captcha' => RecaptchaService::widget('login')]));
     }
 
     public function login(Request $request): Response
     {
+        // Verified before any credential check, so bots cannot probe passwords or lock accounts.
+        RecaptchaService::verify($request->str(RecaptchaService::FIELD), $request->ip(), 'login');
         $user = AuthService::attempt('user', $request->str('login'), (string) $request->input('password', ''), $request->ip(), $request->userAgent());
         return $this->finishLogin($user, $request, $request->bool('remember'));
     }
@@ -87,11 +90,18 @@ final class AuthController extends Controller
         if ($ref = $request->str('ref')) {
             Session::set('ref_code', mb_substr($ref, 0, 20));
         }
-        return $this->view('auth/register', ['title' => 'Create account', 'ref' => (string) Session::get('ref_code', ''), 'mobileMode' => AuthService::mobileMode(), 'google' => GoogleAuthService::enabled()]);
+        return $this->withCaptcha($this->view('auth/register', ['title' => 'Create account', 'ref' => (string) Session::get('ref_code', ''), 'mobileMode' => AuthService::mobileMode(), 'google' => GoogleAuthService::enabled(), 'captcha' => RecaptchaService::widget('register')]));
+    }
+
+    /** Allow Google's reCAPTCHA script/frames on the page, only while reCAPTCHA is ON. */
+    private function withCaptcha(Response $response): Response
+    {
+        return RecaptchaService::enabled() ? $response->withHeader('Content-Security-Policy', RecaptchaService::csp()) : $response;
     }
 
     public function register(Request $request): Response
     {
+        RecaptchaService::verify($request->str(RecaptchaService::FIELD), $request->ip(), 'register');
         $ref = preg_replace('/[^a-z0-9]/', '', strtolower($request->str('ref') ?: (string) Session::get('ref_code', '')));
         $user = AuthService::register($request->post(), $request->ip(), $ref);
         Session::forget('ref_code');

@@ -295,3 +295,15 @@ T::test('Google settings: admin needs credentials to enable; secret encrypted at
     $post(['google_login_enabled' => '0', 'google_client_id' => '']);
     unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
 });
+
+T::test('reCAPTCHA ON does not affect Sign in with Google (OAuth callback needs no token)', function () use ($gEnable, $google, $signOut, $sdb) {
+    $signOut();
+    $gEnable();
+    SettingsService::setMany(['recaptcha_enabled' => '1', 'recaptcha_version' => 'v2', 'recaptcha_site_key' => '6LtestSiteKey', 'recaptcha_secret_key' => 'rc-test-secret']);
+    $u = Fx::user('0', ['email' => 'rcgoogle@example.com', 'email_verified_at' => now()]);
+    $r = $google(['sub' => '7700077', 'email' => 'rcgoogle@example.com']);
+    T::true(str_contains((string) $r->header('Location'), '/dashboard'));
+    T::eq((int) $u['id'], (int) $_SESSION['user_id']);
+    SettingsService::setMany(['recaptcha_enabled' => '0']);
+    $signOut();
+});

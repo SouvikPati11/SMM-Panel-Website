@@ -88,7 +88,7 @@ $primaryUrl = url($user ? '/order' : '/register'); ?>
           <?php foreach ($popular as $s): ?>
             <tr>
               <td data-label="ID" class="mono"><?= (int) $s['id'] ?></td>
-              <td class="cell-main"><span class="cell-title heading-icon"><?= Platforms::icon(Platforms::detect($s['category'])) ?> <span><?= e($s['name']) ?></span></span></td>
+              <td class="cell-main"><span class="cell-title heading-icon"><?= Platforms::icon(Platforms::forCategory(['name' => $s['category'], 'platform' => $s['category_platform'] ?? null])) ?> <span><?= e($s['name']) ?></span></span></td>
               <td data-label="Category"><?= e($s['category']) ?></td>
               <td data-label="Rate" class="num fw-bold nowrap"><?= e(rate($s['rate'])) ?></td>
               <td class="actions"><a class="btn btn-soft btn-sm" href="<?= e(url('/order?service=' . (int) $s['id'])) ?>">Order</a></td>

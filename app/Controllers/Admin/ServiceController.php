@@ -370,13 +370,14 @@ final class ServiceController extends Controller
         $row = [
             'name' => $data['name'], 'slug' => $slug, 'description' => $data['description'] ?: null,
             'sort_order' => (int) ($data['sort_order'] ?: 0), 'status' => $request->str('status') === 'hidden' ? 'hidden' : 'active', 'updated_at' => now(),
+            'platform' => \App\Helpers\Platforms::normalize($request->str('platform')) ?: null, // null = detect from the name
         ];
         if ($id) {
             $db->update('categories', $row, ['id' => $id]);
         } else {
             $id = $db->insert('categories', $row + ['created_at' => now()]);
         }
-        AuditService::log('category.save', 'category', $id, ['name' => $row['name']]);
+        AuditService::log('category.save', 'category', $id, ['name' => $row['name'], 'platform' => $row['platform']]);
         $this->success('Category saved.');
         return Response::redirect(admin_url('categories'));
     }

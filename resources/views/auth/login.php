@@ -15,6 +15,7 @@
     <div class="input-icon"><span class="input-icon-glyph"><?= icon('lock') ?></span><input class="input" id="f_password" name="password" type="password" required autocomplete="current-password" maxlength="128"></div>
   </div>
   <label class="check auth-remember"><input type="checkbox" name="remember" value="1"<?= old('remember') === '1' ? ' checked' : '' ?>> <span>Keep me signed in for <?= (int) \App\Services\RememberService::DAYS ?> days</span></label>
+  <?= $this->partial('partials/recaptcha', ['captcha' => $captcha ?? null]) ?>
   <button class="btn btn-primary btn-lg btn-block" type="submit" data-loading-text="Signing in…"><span>Sign in</span></button>
 </form>
 <?php if (setting('registration_enabled', '1') === '1'): ?><p class="auth-foot">New here? <a href="<?= e(url('/register')) ?>">Create an account</a></p><?php endif ?>

@@ -273,3 +273,133 @@ T::test('Referral: self-referral / same-IP referral blocked', function () use ($
     ManualPaymentService::approve($rid, 1, null, '');
     T::eq('0.000000', ReferralService::stats((int) $ref['id'])['available']);
 });
+
+// ------------------------------------------------------------------ Gateway deposit bonus
+
+$setBonus = static function (int $methodId, ?string $pct, ?string $fixed = '0', ?string $min = null): void {
+    Database::instance()->update('payment_methods', ['bonus_percent' => $pct ?? '0', 'bonus_fixed' => $fixed ?? '0', 'bonus_min_amount' => $min ?? '0'], ['id' => $methodId]);
+};
+$bonusRows = static fn (int $paymentId) => Database::instance()->fetchAll("SELECT amount, reference FROM transactions WHERE payment_id = ? AND type = 'bonus' ORDER BY id", [$paymentId]);
+
+T::test('Gateway bonus: calculation (percent, fixed, minimum) is exact and server-side', function () {
+    T::eq('1.2500', PaymentService::gatewayBonus('25.00', '5', '0', null));
+    T::eq('3.2500', PaymentService::gatewayBonus('25.00', '5', '2', null));
+    T::eq('2.0000', PaymentService::gatewayBonus('25.00', '0', '2', null));
+    T::eq('0.0000', PaymentService::gatewayBonus('9.99', '5', '2', '10'), 'below the minimum');
+    T::eq('0.5000', PaymentService::gatewayBonus('10.00', '5', '0', '10'), 'exactly the minimum qualifies');
+    T::eq('0.0000', PaymentService::gatewayBonus('25.00', null, null, null));
+    T::eq('0.0000', PaymentService::gatewayBonus('25.00', '-5', '-1', null), 'negative terms never debit');
+    T::eq('0.3333', PaymentService::gatewayBonus('3.33', '10.01', '0', null), '3.33 × 10.01% = 0.333333 → 0.3333');
+});
+
+T::test('Gateway bonus (OxaPay): credited once on the verified webhook, as its own ledger entry; duplicate callbacks never credit twice', function () use ($oxaMethod, $oxaFake, $oxaWebhook, $setBonus, $bonusRows) {
+    $setBonus($oxaMethod, '10', '1.50', '20');
+    $u = Fx::user();
+    $st = 'Paid';
+    $oxaFake($st);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    T::eq(['10.00', '1.5000', '20.0000'], [$p['gw_bonus_percent'], $p['gw_bonus_fixed'], $p['gw_bonus_min']], 'terms snapshotted');
+    // Admin changes the terms after the invoice was created: the payment keeps its own terms.
+    $setBonus($oxaMethod, '50', '0', null);
+    $payload = ['track_id' => $p['gateway_ref'], 'status' => 'Paid', 'type' => 'invoice', 'amount' => 25, 'currency' => 'USD', 'order_id' => 'PAY-' . $p['id']];
+    $oxaWebhook($payload);
+    $oxaWebhook($payload);
+    PaymentService::complete((int) $p['id'], 'cron');
+    T::eq('29.000000', Fx::balance((int) $u['id']), '25 + 2.50 + 1.50');
+    T::eq([['amount' => '4.000000', 'reference' => 'payment:' . $p['id'] . ':gwbonus']], $bonusRows((int) $p['id']));
+    T::eq('4.0000', Database::instance()->fetchColumn('SELECT gw_bonus_amount FROM payments WHERE id = ?', [$p['id']]));
+    // Below the minimum of the terms in force: no bonus.
+    $setBonus($oxaMethod, '10', '1.50', '20');
+    $u2 = Fx::user();
+    $p2 = PaymentService::createGatewayPayment($u2, $oxaMethod, '15', '', '1.2.3.4');
+    $oxaFake($st, '15');
+    $oxaWebhook(['track_id' => $p2['gateway_ref'], 'status' => 'Paid', 'type' => 'invoice', 'amount' => 15, 'currency' => 'USD', 'order_id' => 'PAY-' . $p2['id']]);
+    T::eq('15.000000', Fx::balance((int) $u2['id']));
+    T::eq([], $bonusRows((int) $p2['id']));
+    $setBonus($oxaMethod, '0', '0', null);
+});
+
+T::test('Gateway bonus (OxaPay): unpaid, underpaid, forged or failed payments never receive a bonus', function () use ($oxaMethod, $oxaFake, $oxaWebhook, $setBonus, $bonusRows) {
+    $setBonus($oxaMethod, '10', '5', null);
+    $u = Fx::user();
+    $st = 'Waiting';
+    $oxaFake($st);
+    $p = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    $oxaWebhook(['track_id' => $p['gateway_ref'], 'status' => 'Paid', 'type' => 'invoice', 'amount' => 25, 'currency' => 'USD', 'order_id' => 'PAY-' . $p['id']]);
+    $st = 'Paid';
+    $oxaFake($st, '10');
+    $p2 = PaymentService::createGatewayPayment($u, $oxaMethod, '25', '', '1.2.3.4');
+    $oxaWebhook(['track_id' => $p2['gateway_ref'], 'status' => 'Paid', 'type' => 'invoice', 'amount' => 10, 'currency' => 'USD', 'order_id' => 'PAY-' . $p2['id']]);
+    T::eq('0.000000', Fx::balance((int) $u['id']));
+    T::eq([], array_merge($bonusRows((int) $p['id']), $bonusRows((int) $p2['id'])));
+    $setBonus($oxaMethod, '0', '0', null);
+});
+
+T::test('Gateway bonus (Cryptomus): independent terms per gateway', function () use ($cmMethod, $oxaMethod, $cmFake, $cmWebhook, $setBonus, $bonusRows) {
+    $setBonus($cmMethod, '2.5', '0', null);
+    $setBonus($oxaMethod, '20', '10', null); // another gateway's terms never leak
+    $u = Fx::user();
+    $st = 'paid';
+    $cmFake($st);
+    $p = PaymentService::createGatewayPayment($u, $cmMethod, '40', '', '1.2.3.4');
+    $wh = ['type' => 'payment', 'uuid' => $p['gateway_ref'], 'order_id' => 'PAY-' . $p['id'], 'amount' => '40.00', 'payment_amount' => '40.00', 'currency' => 'USD', 'status' => 'paid', 'is_final' => true, 'url' => 'https://x/y'];
+    $cmWebhook($wh);
+    $cmWebhook($wh);
+    T::eq('41.000000', Fx::balance((int) $u['id']), '40 + 2.5%');
+    T::eq(1, count($bonusRows((int) $p['id'])));
+    $setBonus($cmMethod, '0', '0', null);
+    $setBonus($oxaMethod, '0', '0', null);
+});
+
+T::test('Gateway bonus (manual): terms at submission apply on approval, based on the approved amount; approved once', function () use ($manualId, $setBonus, $bonusRows) {
+    $setBonus($manualId, '5', '0', '10');
+    $u = Fx::user();
+    $rid = ManualPaymentService::submit($u, $manualId, '100', 'UTR-BONUS-1', null, '');
+    $setBonus($manualId, '0', '0', null);
+    ManualPaymentService::approve($rid, 1, '80', 'received 80');
+    T::throws(ValidationException::class, fn () => ManualPaymentService::approve($rid, 1, null, ''), 'already');
+    $pid = (int) Database::instance()->fetchColumn('SELECT payment_id FROM manual_payment_requests WHERE id = ?', [$rid]);
+    T::eq('84.000000', Fx::balance((int) $u['id']), '80 approved + 5%');
+    T::eq(1, count($bonusRows($pid)));
+    // A rejected request never gets a bonus.
+    $setBonus($manualId, '5', '0', null);
+    $u2 = Fx::user();
+    $rid2 = ManualPaymentService::submit($u2, $manualId, '50', 'UTR-BONUS-2', null, '');
+    ManualPaymentService::reject($rid2, 1, 'Not received');
+    T::eq('0.000000', Fx::balance((int) $u2['id']));
+    $setBonus($manualId, '0', '0', null);
+});
+
+T::test('Gateway bonus (HTTP): shown before paying; tampered POST fields cannot change it; admin validates terms', function () use ($manualId, $oxaMethod, $setBonus, $bonusRows) {
+    $setBonus($manualId, '7.5', '1', '20');
+    $u = Fx::user();
+    login_as_user($u);
+    $html = http('GET', '/funds')->body();
+    T::true(str_contains($html, 'data-bonus-pct="7.50"') && str_contains($html, 'data-bonus-fixed="1.0000"') && str_contains($html, 'data-bonus-min="20.0000"'));
+    T::true(str_contains($html, '7.5% + ') && str_contains($html, 'bonus on deposits of'), 'bonus label on the method card');
+    T::true(str_contains($html, 'class="bonus-preview"'));
+    // Extra fields in the POST are ignored: the bonus comes only from the gateway's stored terms.
+    http('POST', '/funds/manual', ['_token' => csrf(), 'method_id' => $manualId, 'amount' => '40', 'reference' => 'UTR-BONUS-HTTP', 'bonus_percent' => '100', 'gw_bonus_fixed' => '999', 'gw_bonus_percent' => '100']);
+    $req = Database::instance()->fetch("SELECT * FROM manual_payment_requests WHERE reference = 'UTR-BONUS-HTTP'");
+    T::eq(['7.50', '1.0000', '20.0000'], [$req['gw_bonus_percent'], $req['gw_bonus_fixed'], $req['gw_bonus_min']]);
+    ManualPaymentService::approve((int) $req['id'], 1, null, '');
+    T::eq('44.000000', Fx::balance((int) $u['id']), '40 + 3.00 + 1.00');
+    App\Services\Auth::logoutUser();
+    // Admin form: invalid terms refused, valid terms saved and audited.
+    $db = Database::instance();
+    $admin = (int) $db->fetchColumn('SELECT id FROM admins WHERE is_super = 1 LIMIT 1') ?: $db->insert('admins', ['username' => 'bonusadmin', 'email' => 'bonusadmin@example.com', 'password_hash' => 'x', 'status' => 'active', 'is_super' => 1, 'created_at' => now(), 'updated_at' => now()]);
+    login_as_admin($admin);
+    $m = $db->fetch('SELECT * FROM payment_methods WHERE id = ?', [$oxaMethod]);
+    $form = ['_token' => csrf(), 'id' => $oxaMethod, 'name' => $m['name'], 'min_amount' => '1', 'max_amount' => '10000', 'fee_percent' => '0', 'sort_order' => '0', 'status' => 'active'];
+    http('POST', '/' . admin_path() . '/gateways/save', $form + ['bonus_percent' => '150', 'bonus_fixed' => '0']);
+    T::eq('0.00', $db->fetchColumn('SELECT bonus_percent FROM payment_methods WHERE id = ?', [$oxaMethod]), '>100% refused');
+    http('POST', '/' . admin_path() . '/gateways/save', $form + ['bonus_percent' => '-1', 'bonus_fixed' => '0']);
+    T::eq('0.00', $db->fetchColumn('SELECT bonus_percent FROM payment_methods WHERE id = ?', [$oxaMethod]), 'negative refused');
+    http('POST', '/' . admin_path() . '/gateways/save', $form + ['bonus_percent' => '3', 'bonus_fixed' => '0.5', 'bonus_min_amount' => '']);
+    T::eq(['3.00', '0.5000', '0.0000'], array_values($db->fetch('SELECT bonus_percent, bonus_fixed, bonus_min_amount FROM payment_methods WHERE id = ?', [$oxaMethod])));
+    T::true(str_contains(http('GET', '/' . admin_path() . '/gateways/' . $oxaMethod . '/edit')->body(), 'Deposit bonus'));
+    T::true(str_contains(http('GET', '/' . admin_path() . '/gateways')->body(), '3% + '));
+    unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
+    $setBonus($oxaMethod, '0', '0', null);
+    $setBonus($manualId, '0', '0', null);
+});

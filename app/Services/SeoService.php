@@ -53,9 +53,10 @@ final class SeoService
 
     public static function organizationJsonLd(): array
     {
-        $sameAs = array_values(array_filter([
-            setting('social_facebook'), setting('social_instagram'), setting('social_x'), setting('social_youtube'), setting('social_telegram'),
-        ]));
+        $sameAs = array_values(array_filter(
+            array_map(static fn ($k) => trim((string) setting($k, '')), ['social_facebook', 'social_instagram', 'social_x', 'social_youtube', 'social_telegram', 'social_tiktok']),
+            static fn ($u) => (bool) preg_match('#^https?://#i', $u)
+        ));
         $org = ['@context' => 'https://schema.org', '@type' => 'Organization', 'name' => site_name(), 'url' => url('/')];
         if (setting('site_logo')) {
             $org['logo'] = upload_url((string) setting('site_logo'));

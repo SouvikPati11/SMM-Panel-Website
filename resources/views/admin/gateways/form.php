@@ -18,6 +18,14 @@
       </div>
       <?= Form::select('status', 'Status', ['active' => 'Active', 'disabled' => 'Disabled'], $m['status'] ?? 'disabled') ?>
     </div></div>
+    <div class="card mb-2" id="deposit-bonus"><div class="card-header"><h2>Deposit bonus</h2></div><div class="card-body">
+      <p class="text-sm text-muted">Extra balance credited automatically when a deposit through <strong>this gateway only</strong> is confirmed. Calculated on the server from the confirmed amount; shown to users before they pay. Leave both at 0 for no bonus.</p>
+      <div class="form-grid">
+        <?= Form::input('bonus_percent', 'Bonus %', isset($m['bonus_percent']) ? rtrim(rtrim((string) $m['bonus_percent'], '0'), '.') ?: '0' : '0', ['type' => 'number', 'step' => '0.01', 'min' => 0, 'max' => 100, 'hint' => 'Percent of the deposit.']) ?>
+        <?= Form::input('bonus_fixed', 'Fixed bonus (' . e(setting('currency_code', 'USD')) . ')', isset($m['bonus_fixed']) ? rtrim(rtrim((string) $m['bonus_fixed'], '0'), '.') ?: '0' : '0', ['type' => 'number', 'step' => '0.01', 'min' => 0, 'hint' => 'Added to every qualifying deposit.']) ?>
+        <?= Form::input('bonus_min_amount', 'Minimum deposit for bonus', \App\Core\Money::isPositive((string) ($m['bonus_min_amount'] ?? '0')) ? rtrim(rtrim((string) $m['bonus_min_amount'], '0'), '.') : '', ['type' => 'number', 'step' => '0.01', 'min' => 0, 'hint' => 'Empty or 0 = every deposit qualifies.']) ?>
+      </div>
+    </div></div>
     <?php if ($isManual): ?>
     <div class="card"><div class="card-header"><h2>Manual payment details</h2></div><div class="card-body">
       <?= Form::input('account', 'Account / UPI ID / wallet address', $m['account'] ?? '', ['hint' => 'Shown with a copy button.']) ?>

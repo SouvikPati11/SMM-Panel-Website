@@ -24,6 +24,7 @@ T::test('Platforms: categories map to platforms by name (no false positives on c
         'Instagram Followers' => 'instagram', 'IG Likes [Real]' => 'instagram', 'Facebook Page Likes' => 'facebook', 'TikTok Views' => 'tiktok',
         'YouTube Subscribers' => 'youtube', 'YouTube Shorts Views' => 'youtube', 'Telegram Members' => 'telegram', 'Twitter Followers' => 'x', 'X Followers' => 'x',
         'Spotify Plays' => 'spotify', 'Website Traffic' => 'website', 'Twitch Followers' => 'twitch', 'LinkedIn Connections' => 'linkedin',
+        'VK Friends' => 'vk', 'Vkontakte Likes' => 'vk', 'Threads Followers' => 'threads',
         'Extra Services' => 'other', 'Express Delivery' => 'other', 'Mixed Package' => 'other',
     ] as $name => $platform) {
         T::eq($platform, Platforms::detect($name), $name);
@@ -31,14 +32,45 @@ T::test('Platforms: categories map to platforms by name (no false positives on c
     T::true(str_contains(Platforms::icon('tiktok'), '<svg') && str_contains(Platforms::icon('unknown'), '<svg'));
 });
 
-T::test('Order page: platform shortcuts only for platforms with services; categories carry icons', function () {
+T::test('Order page: 2-column platform card grid (All … Other) filters by the configured category platform', function () use ($nfCats) {
     $u = Fx::user('10');
     login_as_user($u);
     $html = http('GET', '/order')->body();
-    T::true(str_contains($html, 'data-platform="instagram"') && str_contains($html, 'data-platform="tiktok"'));
-    T::true(!str_contains($html, 'class="platform-chip" type="button" data-platform="spotify"'), 'no shortcut without services');
+    // Every card, in order, each with an icon and a name; cards without services are disabled, not hidden.
+    preg_match_all('/<button class="pf-card[^"]*" type="button" data-platform="([a-z]*)"/', $html, $m);
+    T::eq(['', 'instagram', 'tiktok', 'youtube', 'facebook', 'x', 'telegram', 'spotify', 'threads', 'vk', 'twitch', 'other'], $m[1]);
+    T::true((bool) preg_match('/data-platform="spotify"[^>]*disabled/', $html), 'no services → disabled card');
+    T::true(!preg_match('/data-platform="instagram"[^>]*disabled/', $html));
+    T::true(str_contains($html, 'id="platform-search"') && str_contains($html, 'class="pf-grid"'), 'searchable grid');
     T::true(str_contains($html, 'id="order-confirm"') && str_contains($html, 'id="confirm-submit"'), 'confirmation dialog present');
     T::true(str_contains($html, 'platform-icon'));
+    // "Before you order" is gone (and its sidebar with it).
+    T::true(!str_contains($html, 'Before you order') && !str_contains($html, 'sticky-side'));
+    // Category options carry their card group; the category platform set by the admin wins over the name.
+    T::true(str_contains($html, 'data-platform="tiktok" data-group="tiktok"'));
+    Database::instance()->update('categories', ['platform' => 'vk'], ['id' => $nfCats['TikTok Views']]);
+    $html = http('GET', '/order')->body();
+    T::true(str_contains($html, 'data-platform="vk" data-group="vk"'), 'admin-configured platform used');
+    T::true(!preg_match('/data-platform="vk"[^>]*disabled/', $html));
+    // Platforms without their own card are grouped under Other.
+    Database::instance()->update('categories', ['platform' => 'discord'], ['id' => $nfCats['TikTok Views']]);
+    T::true(str_contains(http('GET', '/order')->body(), 'data-platform="discord" data-group="other"'));
+    Database::instance()->update('categories', ['platform' => null], ['id' => $nfCats['TikTok Views']]);
+});
+
+T::test('Admin categories: platform is configurable and validated (unknown values fall back to auto-detect)', function () use ($nfCats) {
+    $db = Database::instance();
+    $admin = (int) $db->fetchColumn('SELECT id FROM admins WHERE is_super = 1 LIMIT 1') ?: $db->insert('admins', ['username' => 'nfadmin', 'email' => 'nfadmin@example.com', 'password_hash' => 'x', 'status' => 'active', 'is_super' => 1, 'created_at' => now(), 'updated_at' => now()]);
+    login_as_admin($admin);
+    $id = $nfCats['Telegram Members'];
+    http('POST', '/' . admin_path() . '/categories/save', ['_token' => csrf(), 'id' => $id, 'name' => 'Telegram Members', 'slug' => 'nf-cat-3', 'sort_order' => '3', 'status' => 'active', 'platform' => 'threads']);
+    T::eq('threads', $db->fetchColumn('SELECT platform FROM categories WHERE id = ?', [$id]));
+    http('POST', '/' . admin_path() . '/categories/save', ['_token' => csrf(), 'id' => $id, 'name' => 'Telegram Members', 'slug' => 'nf-cat-3', 'sort_order' => '3', 'status' => 'active', 'platform' => '<script>']);
+    T::eq(null, $db->fetchColumn('SELECT platform FROM categories WHERE id = ?', [$id]));
+    T::eq('telegram', Platforms::forCategory(['name' => 'Telegram Members', 'platform' => null]));
+    $html = http('GET', '/' . admin_path() . '/categories')->body();
+    T::true(str_contains($html, 'name="platform"') && str_contains($html, '(auto)'));
+    unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
 });
 
 T::test('Quote: server computes the price (client values ignored) and charges nothing', function () use ($nfService, $nfJson) {

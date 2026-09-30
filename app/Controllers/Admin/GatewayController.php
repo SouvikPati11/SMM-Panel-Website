@@ -77,6 +77,9 @@ final class GatewayController extends Controller
             'min_amount' => 'required|decimal|min:0.01',
             'max_amount' => 'required|decimal|min:0',
             'fee_percent' => 'decimal|min:0|max:50',
+            'bonus_percent' => 'decimal|min:0|max:100',
+            'bonus_fixed' => 'decimal|min:0|max:1000000',
+            'bonus_min_amount' => 'decimal|min:0',
             'sort_order' => 'integer',
             'account' => 'max:500',
         ]);
@@ -89,6 +92,9 @@ final class GatewayController extends Controller
             'min_amount' => Money::of($data['min_amount'], 4),
             'max_amount' => Money::of($data['max_amount'], 4),
             'fee_percent' => Money::of($data['fee_percent'] ?: '0', 2),
+            'bonus_percent' => Money::of($data['bonus_percent'] ?: '0', 2),
+            'bonus_fixed' => Money::of($data['bonus_fixed'] ?: '0', 4),
+            'bonus_min_amount' => Money::of($data['bonus_min_amount'] ?: '0', 4), // 0 = every deposit qualifies
             'sort_order' => (int) ($data['sort_order'] ?: 0),
             'status' => $request->str('status') === 'active' ? 'active' : 'disabled',
             'updated_at' => now(),
@@ -142,7 +148,7 @@ final class GatewayController extends Controller
         } else {
             $id = $db->insert('payment_methods', $row + ['gateway' => 'manual', 'created_at' => now()]);
         }
-        AuditService::log('gateway.save', 'payment_method', $id, ['name' => $row['name'], 'status' => $row['status']]);
+        AuditService::log('gateway.save', 'payment_method', $id, ['name' => $row['name'], 'status' => $row['status'], 'bonus' => [$row['bonus_percent'], $row['bonus_fixed'], $row['bonus_min_amount']]]);
         $this->success('Payment method saved.');
         return Response::redirect(admin_url('gateways/' . $id . '/edit'));
     }

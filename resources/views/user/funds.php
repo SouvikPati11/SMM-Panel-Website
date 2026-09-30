@@ -1,4 +1,4 @@
-<?php $this->extend('layouts/user'); use App\Core\Money; ?>
+<?php $this->extend('layouts/user'); use App\Core\Money; use App\Services\PaymentService; ?>
 <div class="page-head"><div><h1>Add funds</h1><p>Your balance: <strong><?= e(money_base($user['balance'])) ?></strong><?php if (\App\Services\CurrencyService::isConverted()): ?> <span class="text-muted">(≈ <?= e(money($user['balance'])) ?>)</span><?php endif ?></p></div></div>
 <?php if (\App\Services\CurrencyService::isConverted()): ?><div class="alert alert-info"><?= icon('info') ?><div>Deposits are paid and credited in <strong><?= e(\App\Services\CurrencyService::base()['code']) ?></strong>, the currency your balance is kept in. Amounts in <?= e(\App\Services\CurrencyService::display()['code']) ?> elsewhere on the site are converted for display only.</div></div><?php endif ?>
 
@@ -12,9 +12,10 @@
       <div class="card-body" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
         <?php foreach ($methods as $i => $m): ?>
         <label class="card method-card" data-method="<?= (int) $m['id'] ?>">
-          <input type="radio" name="method_select" value="<?= (int) $m['id'] ?>" data-gateway="<?= e($m['gateway']) ?>" data-min="<?= e(Money::of((string) $m['min_amount'], 2)) ?>" data-max="<?= e(Money::of((string) $m['max_amount'], 2)) ?>" data-limits="<?= e('Minimum ' . money_base($m['min_amount']) . ' · maximum ' . money_base($m['max_amount']) . ' with ' . $m['name'] . '.') ?>" <?= $i === 0 ? 'checked' : '' ?>>
+          <input type="radio" name="method_select" value="<?= (int) $m['id'] ?>" data-gateway="<?= e($m['gateway']) ?>" data-min="<?= e(Money::of((string) $m['min_amount'], 2)) ?>" data-max="<?= e(Money::of((string) $m['max_amount'], 2)) ?>" data-limits="<?= e('Minimum ' . money_base($m['min_amount']) . ' · maximum ' . money_base($m['max_amount']) . ' with ' . $m['name'] . '.') ?>"<?php $bt = PaymentService::bonusTerms($m); if ($bt['gw_bonus_percent'] !== null): ?> data-bonus-pct="<?= e($bt['gw_bonus_percent']) ?>" data-bonus-fixed="<?= e($bt['gw_bonus_fixed']) ?>" data-bonus-min="<?= e((string) $bt['gw_bonus_min']) ?>"<?php endif ?> <?= $i === 0 ? 'checked' : '' ?>>
           <span class="method-card-text"><strong><?= e($m['name']) ?></strong>
-          <span class="text-xs text-muted">Min <?= e(money_base($m['min_amount'])) ?> · max <?= e(money_base($m['max_amount'])) ?><?= Money::isPositive((string) $m['fee_percent']) ? ' · ' . e(rtrim(rtrim($m['fee_percent'], '0'), '.')) . '% fee' : '' ?></span></span>
+          <span class="text-xs text-muted">Min <?= e(money_base($m['min_amount'])) ?> · max <?= e(money_base($m['max_amount'])) ?><?= Money::isPositive((string) $m['fee_percent']) ? ' · ' . e(rtrim(rtrim($m['fee_percent'], '0'), '.')) . '% fee' : '' ?></span>
+          <?php if (($bl = PaymentService::bonusLabel($m)) !== ''): ?><span class="method-bonus"><?= icon('gift') ?> <?= e($bl) ?></span><?php endif ?></span>
         </label>
         <?php endforeach ?>
       </div>
@@ -34,7 +35,7 @@
             <?= csrf_field() ?>
             <input type="hidden" name="method_id" class="method-id" value="<?= (int) $m['id'] ?>">
             <div class="form-grid">
-              <div class="field"><label>Amount paid</label><div class="input-group"><span class="input-prefix"><?= e(setting('currency_symbol', '$')) ?></span><input class="input" name="amount" type="number" step="0.01" min="<?= e(Money::of((string) $m['min_amount'], 2)) ?>" max="<?= e(Money::of((string) $m['max_amount'], 2)) ?>" required inputmode="decimal" placeholder="<?= e(Money::of((string) $m['min_amount'], 2)) ?>"></div><div class="hint">Minimum <?= e(money_base($m['min_amount'])) ?> · maximum <?= e(money_base($m['max_amount'])) ?>.</div></div>
+              <div class="field"><label>Amount paid</label><div class="input-group"><span class="input-prefix"><?= e(setting('currency_symbol', '$')) ?></span><input class="input" name="amount" type="number" step="0.01" min="<?= e(Money::of((string) $m['min_amount'], 2)) ?>" max="<?= e(Money::of((string) $m['max_amount'], 2)) ?>" required inputmode="decimal" placeholder="<?= e(Money::of((string) $m['min_amount'], 2)) ?>"></div><div class="hint">Minimum <?= e(money_base($m['min_amount'])) ?> · maximum <?= e(money_base($m['max_amount'])) ?>.</div><div class="bonus-preview" aria-live="polite" hidden></div></div>
               <div class="field"><label>Transaction / reference ID</label><input class="input" name="reference" required maxlength="120" placeholder="e.g. UTR number"></div>
             </div>
             <div class="field"><label>Payment screenshot <?= (int) $m['require_proof'] === 1 ? '' : '<span class="text-muted">(optional)</span>' ?></label><input class="input" type="file" name="proof" accept="image/jpeg,image/png,image/webp" <?= (int) $m['require_proof'] === 1 ? 'required' : '' ?>><div class="hint">JPG, PNG or WebP, max <?= round((int) \App\Core\Config::get('uploads.max_bytes') / 1048576, 1) ?> MB.</div></div>
@@ -52,7 +53,7 @@
         <form method="post" action="<?= e(url('/funds')) ?>">
           <?= csrf_field() ?>
           <input type="hidden" name="method_id" class="method-id" value="">
-          <div class="field"><label>Amount</label><div class="input-group"><span class="input-prefix"><?= e(setting('currency_symbol', '$')) ?></span><input class="input" name="amount" type="number" step="0.01" min="0.01" required inputmode="decimal" aria-describedby="gw-limits"></div><div class="hint" id="gw-limits"></div></div>
+          <div class="field"><label>Amount</label><div class="input-group"><span class="input-prefix"><?= e(setting('currency_symbol', '$')) ?></span><input class="input" name="amount" type="number" step="0.01" min="0.01" required inputmode="decimal" aria-describedby="gw-limits"></div><div class="hint" id="gw-limits"></div><div class="bonus-preview" aria-live="polite" hidden></div></div>
           <div class="field" data-for-gateway="p2gateway" hidden><label for="customer_mobile">Mobile number</label><input class="input" id="customer_mobile" name="customer_mobile" type="tel" inputmode="tel" maxlength="14" autocomplete="tel" value="<?= e($lastMobile) ?>" placeholder="10-digit mobile number"><div class="hint">Mobile number linked to your UPI app. Payment links expire after 30 minutes.</div></div>
           <div class="field"><label>Promo code <span class="text-muted">(optional)</span></label><div class="input-group"><input class="input" name="coupon" maxlength="40" autocomplete="off"><button class="btn btn-secondary" type="button" data-coupon-check="<?= e(url('/funds/coupon')) ?>">Apply</button></div><div class="coupon-result hint"></div></div>
           <button class="btn btn-primary btn-lg btn-block" type="submit"><?= icon('external') ?> Continue to payment</button>

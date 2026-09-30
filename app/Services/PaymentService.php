@@ -71,6 +71,55 @@ final class PaymentService
     }
 
     /**
+     * Gateway deposit bonus (Admin → Payment gateways): percent of the deposit
+     * plus an optional fixed amount, for deposits of at least the minimum.
+     * Calculated on the server only, from terms snapshotted on the payment
+     * when it was created (a later change of the gateway's terms never alters
+     * a payment already in progress).
+     */
+    public static function gatewayBonus(string $amount, ?string $percent, ?string $fixed, ?string $min): string
+    {
+        $percent = Money::isNumeric((string) $percent) ? Money::max(Money::of((string) $percent, 2), '0') : '0';
+        $fixed = Money::isNumeric((string) $fixed) ? Money::max(Money::of((string) $fixed, 4), '0') : '0';
+        if (!Money::isPositive($amount) || (!Money::isPositive($percent) && !Money::isPositive($fixed))) {
+            return '0.0000';
+        }
+        if ($min !== null && $min !== '' && Money::isNumeric($min) && Money::cmp($amount, Money::of($min, 4)) < 0) {
+            return '0.0000';
+        }
+        return Money::of(Money::add(Money::percent($amount, $percent, 4), $fixed), 4);
+    }
+
+    /** Bonus terms of a payment method, to snapshot on a payment / manual request. */
+    public static function bonusTerms(array $method): array
+    {
+        $pct = Money::of((string) ($method['bonus_percent'] ?? '0'), 2);
+        $fixed = Money::of((string) ($method['bonus_fixed'] ?? '0'), 4);
+        if (!Money::isPositive($pct) && !Money::isPositive($fixed)) {
+            return ['gw_bonus_percent' => null, 'gw_bonus_fixed' => null, 'gw_bonus_min' => null];
+        }
+        $min = Money::of((string) ($method['bonus_min_amount'] ?? '0'), 4);
+        return ['gw_bonus_percent' => $pct, 'gw_bonus_fixed' => $fixed, 'gw_bonus_min' => Money::isPositive($min) ? $min : null];
+    }
+
+    /** Short human description of a method's bonus ("5% bonus + $1.00 on deposits of $10.00 or more"), or ''. */
+    public static function bonusLabel(array $method): string
+    {
+        $t = self::bonusTerms($method);
+        if ($t['gw_bonus_percent'] === null) {
+            return '';
+        }
+        $parts = [];
+        if (Money::isPositive($t['gw_bonus_percent'])) {
+            $parts[] = rtrim(rtrim($t['gw_bonus_percent'], '0'), '.') . '%';
+        }
+        if (Money::isPositive($t['gw_bonus_fixed'])) {
+            $parts[] = money_base($t['gw_bonus_fixed']);
+        }
+        return implode(' + ', $parts) . ' bonus' . ($t['gw_bonus_min'] !== null ? ' on deposits of ' . money_base($t['gw_bonus_min']) . ' or more' : '');
+    }
+
+    /**
      * Create a pending payment and an invoice at the gateway.
      * @param array $fields customer inputs required by the gateway (paymentFields())
      * @return array payment row (with pay_url)
@@ -116,7 +165,7 @@ final class PaymentService
             'expires_at' => gmdate('Y-m-d H:i:s', time() + $expiryMin * 60),
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ] + self::bonusTerms($method)); // bonus terms snapshotted: credited on completion
         // Unique merchant reference (DB-enforced). LOCAL PAYMENT ID → MERCHANT ORDER ID → GATEWAY ORDER ID.
         $db->update('payments', ['merchant_order_id' => $gateway->merchantOrderId(['id' => $paymentId])], ['id' => $paymentId]);
         $payment = $db->fetch('SELECT * FROM payments WHERE id = ?', [$paymentId]);
@@ -184,12 +233,18 @@ final class PaymentService
             if ($p['coupon_id']) {
                 $bonus = CouponService::redeem((int) $p['coupon_id'], (int) $p['user_id'], $p);
             }
+            // Gateway bonus: separate ledger entry with its own unique reference (credited once).
+            $gwBonus = self::gatewayBonus((string) $p['amount'], $p['gw_bonus_percent'] ?? null, $p['gw_bonus_fixed'] ?? null, $p['gw_bonus_min'] ?? null);
+            if (Money::isPositive($gwBonus)) {
+                WalletService::apply((int) $p['user_id'], $gwBonus, 'bonus', 'payment:' . $p['id'] . ':gwbonus', self::gatewayLabel($p['gateway']) . ' deposit bonus (payment #' . $p['id'] . ')', ['payment_id' => (int) $p['id']]);
+            }
             ReferralService::commission($p);
             $existingMeta = json_decode((string) $p['meta'], true) ?: [];
             $db->update('payments', [
                 'status' => 'completed',
                 'completed_at' => now(),
                 'bonus_amount' => $bonus,
+                'gw_bonus_amount' => $gwBonus,
                 'gateway_status' => isset($meta['gateway_status']) ? mb_substr((string) $meta['gateway_status'], 0, 40) : $p['gateway_status'],
                 'meta' => json_encode(array_merge($existingMeta, ['completed_by' => $source], $meta)),
                 'verified_amount' => isset($verified['amount']) && Money::isNumeric((string) $verified['amount']) ? Money::of((string) $verified['amount'], 4) : $p['verified_amount'],
@@ -201,7 +256,7 @@ final class PaymentService
         if ($credited) {
             $p = $db->fetch('SELECT * FROM payments WHERE id = ?', [$paymentId]);
             Logger::info("Payment #{$paymentId} completed via {$source}", ['amount' => $p['amount'], 'user' => $p['user_id']], 'payment');
-            NotificationService::notify((int) $p['user_id'], 'payment', 'Funds added: ' . money($p['amount']), 'Your deposit #' . $paymentId . ' was confirmed and added to your balance.' . (Money::isPositive((string) $p['bonus_amount']) ? ' Bonus: ' . money($p['bonus_amount']) . '.' : ''), '/transactions');
+            NotificationService::notify((int) $p['user_id'], 'payment', 'Funds added: ' . money($p['amount']), 'Your deposit #' . $paymentId . ' was confirmed and added to your balance.' . (Money::isPositive((string) $p['bonus_amount']) ? ' Promo bonus: ' . money($p['bonus_amount']) . '.' : '') . (Money::isPositive((string) $p['gw_bonus_amount']) ? ' Deposit bonus: ' . money($p['gw_bonus_amount']) . '.' : ''), '/transactions');
         }
         return $credited;
     }

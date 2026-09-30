@@ -54,7 +54,7 @@ final class ManualPaymentService
                 'status' => 'pending',
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]);
+            ] + PaymentService::bonusTerms($method));
         } catch (\PDOException $e) {
             if (str_contains($e->getMessage(), 'uq_mpr_reference')) {
                 throw new ValidationException('This transaction reference has already been submitted.');
@@ -95,6 +95,10 @@ final class ManualPaymentService
                 'gateway_ref' => 'manual-' . $requestId,
                 'status' => 'pending',
                 'coupon_id' => $couponId,
+                // Bonus terms as they were when the user submitted the request.
+                'gw_bonus_percent' => $req['gw_bonus_percent'] ?? null,
+                'gw_bonus_fixed' => $req['gw_bonus_fixed'] ?? null,
+                'gw_bonus_min' => $req['gw_bonus_min'] ?? null,
                 'meta' => json_encode(['manual_request' => $requestId, 'reference' => $req['reference'], 'admin_id' => $adminId]),
                 'created_at' => now(),
                 'updated_at' => now(),

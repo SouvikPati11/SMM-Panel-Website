@@ -36,7 +36,8 @@ $history = $meta['review_history'] ?? []; $expected = Money::of(Money::add((stri
     <div class="card mb-2"><div class="card-body"><dl class="dl">
       <dt>Amount</dt><dd><strong><?= e(money($p['amount'])) ?></strong><?= Money::isPositive((string) $p['fee']) ? ' + ' . e(money($p['fee'])) . ' fee' : '' ?> <span class="text-muted"><?= e($p['currency']) ?></span></dd>
       <dt>Verified by gateway</dt><dd><?= $p['verified_amount'] !== null ? e(money($p['verified_amount'])) : '—' ?></dd>
-      <dt>Bonus</dt><dd><?= Money::isPositive((string) $p['bonus_amount']) ? e(money($p['bonus_amount'])) : '—' ?></dd>
+      <dt>Promo bonus</dt><dd><?= Money::isPositive((string) $p['bonus_amount']) ? e(money($p['bonus_amount'])) : '—' ?></dd>
+      <dt>Gateway bonus</dt><dd><?= Money::isPositive((string) ($p['gw_bonus_amount'] ?? '0')) ? e(money($p['gw_bonus_amount'])) : '—' ?><?php if ($p['gw_bonus_percent'] !== null && $p['status'] !== 'completed'): ?><div class="cell-sub">Terms: <?= e(rtrim(rtrim((string) $p['gw_bonus_percent'], '0'), '.')) ?>% + <?= e(money($p['gw_bonus_fixed'])) ?><?= $p['gw_bonus_min'] !== null ? ' from ' . e(money($p['gw_bonus_min'])) : '' ?></div><?php endif ?></dd>
       <dt>Merchant order ID</dt><dd class="mono break"><?= e($p['merchant_order_id'] ?: '—') ?></dd>
       <dt>Gateway reference</dt><dd class="mono break"><?= e($p['gateway_ref'] ?: '—') ?></dd>
       <dt>UTR</dt><dd class="mono"><?= e($p['utr'] ?: '—') ?></dd>

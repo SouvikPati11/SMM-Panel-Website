@@ -1,14 +1,19 @@
 <?php $this->extend('layouts/user');
 use App\Helpers\Platforms;
-// Platforms that actually have services in this catalog, in catalog order.
-$platforms = [];
+// Shortcut cards: All + the main platforms + Other (everything else). Counts come from the
+// categories' configured platform (Admin → Categories), never from service IDs.
+$groupCount = [];
+$perCat = array_count_values(array_column($services, 'c'));
 foreach ($categories as $c) {
-    $platforms[$c['p']] = true;
+    $groupCount[$c['g']] = ($groupCount[$c['g']] ?? 0) + (int) ($perCat[(int) $c['id']] ?? 0);
 }
-$platforms = array_keys($platforms);
+$cards = array_merge(Platforms::SHORTCUTS, [Platforms::OTHER]);
 $icons = [];
-foreach (array_merge($platforms, [Platforms::OTHER]) as $p) {
-    $icons[$p] = Platforms::icon($p);
+foreach ($categories as $c) {
+    $icons[$c['p']] ??= Platforms::icon($c['p']);
+}
+foreach ($cards as $p) {
+    $icons[$p] ??= Platforms::icon($p);
 } ?>
 <div class="page-head">
   <div><h1>New order</h1><p>Choose a service, paste your link and confirm the price.</p></div>
@@ -20,14 +25,20 @@ foreach (array_merge($platforms, [Platforms::OTHER]) as $p) {
 <?php if (!$services): ?>
   <div class="card"><div class="empty"><?= icon('layers') ?><h3>No services available yet</h3><p>Please check back soon.</p></div></div>
 <?php else: ?>
-<?php if (count($platforms) > 1): ?>
-<div class="platform-bar" role="group" aria-label="Filter services by platform">
-  <button class="platform-chip active" type="button" data-platform=""><?= icon('layers', 'platform-icon') ?><span>All</span></button>
-  <?php foreach ($platforms as $p): ?><button class="platform-chip" type="button" data-platform="<?= e($p) ?>"><?= $icons[$p] ?><span><?= e(Platforms::label($p)) ?></span></button><?php endforeach ?>
-</div>
-<?php endif ?>
-<div class="grid-main-wide">
-  <div class="card"><div class="card-body">
+<div class="order-layout">
+  <section class="card pf-panel" aria-labelledby="platform-title">
+    <div class="pf-panel-head">
+      <h2 id="platform-title" class="pf-panel-title">Platforms</h2>
+      <div class="input-icon pf-search"><span class="input-icon-glyph"><?= icon('search') ?></span><input class="input input-sm" id="platform-search" type="search" placeholder="Search platforms" aria-label="Search platforms" autocomplete="off" aria-controls="pf-grid"></div>
+    </div>
+    <div class="pf-grid" id="pf-grid" role="group" aria-label="Filter categories and services by platform">
+      <button class="pf-card active" type="button" data-platform="" data-name="all" aria-pressed="true"><span class="pf-card-icon"><?= icon('layers', 'platform-icon') ?></span><span class="pf-card-text"><span class="pf-card-name">All</span><span class="pf-card-meta"><?= count($services) ?> services</span></span></button>
+      <?php foreach ($cards as $p): $n = $groupCount[$p] ?? 0; ?><button class="pf-card pf-card-<?= e($p) ?>" type="button" data-platform="<?= e($p) ?>" data-name="<?= e(mb_strtolower(Platforms::label($p) . ' ' . $p . ($p === 'x' ? ' twitter' : '') . ($p === 'vk' ? ' vkontakte' : ''))) ?>" aria-pressed="false"<?= $n ? '' : ' disabled' ?>><span class="pf-card-icon"><?= $icons[$p] ?></span><span class="pf-card-text"><span class="pf-card-name"><?= e(Platforms::label($p)) ?></span><span class="pf-card-meta"><?= $n ? $n . ' ' . ($n === 1 ? 'service' : 'services') : 'No services' ?></span></span></button><?php endforeach ?>
+      <p class="pf-empty text-sm text-muted" id="pf-empty" hidden>No platform matches.</p>
+    </div>
+  </section>
+
+  <div class="card order-main"><div class="card-body">
     <form id="order-form" method="post" action="<?= e(url('/order')) ?>" data-info-url="<?= e(url('/order/service/__ID__')) ?>" data-quote-url="<?= e(url('/order/quote')) ?>" data-balance="<?= e($user['balance']) ?>" data-preselect="<?= e((string) $preselect) ?>" data-no-lock>
       <?= csrf_field() ?>
       <input type="hidden" name="form_key" value="<?= e($formKey) ?>">
@@ -42,8 +53,7 @@ foreach (array_merge($platforms, [Platforms::OTHER]) as $p) {
         <label for="category">Category</label>
         <div class="select-icon"><span class="select-icon-glyph" id="category-icon" aria-hidden="true"><?= $icons[$categories[0]['p']] ?? '' ?></span>
           <select class="select" id="category" name="category">
-            <?php $perCat = array_count_values(array_column($services, 'c'));
-            foreach ($categories as $c): $n = (int) ($perCat[(int) $c['id']] ?? 0); ?><option value="<?= (int) $c['id'] ?>" data-platform="<?= e($c['p']) ?>" data-sub="<?= e(Platforms::label($c['p'])) ?>" data-meta="<?= $n ?> <?= $n === 1 ? 'service' : 'services' ?>"><?= e($c['n']) ?></option><?php endforeach ?>
+            <?php foreach ($categories as $c): $n = (int) ($perCat[(int) $c['id']] ?? 0); ?><option value="<?= (int) $c['id'] ?>" data-platform="<?= e($c['p']) ?>" data-group="<?= e($c['g']) ?>" data-sub="<?= e(Platforms::label($c['p'])) ?>" data-meta="<?= $n ?> <?= $n === 1 ? 'service' : 'services' ?>"><?= e($c['n']) ?></option><?php endforeach ?>
           </select></div>
       </div>
 
@@ -156,24 +166,10 @@ foreach (array_merge($platforms, [Platforms::OTHER]) as $p) {
       <div class="alert alert-danger" id="quote-error" hidden role="alert"></div>
 
       <button class="btn btn-primary btn-lg btn-block" type="submit" id="order-submit" disabled><?= icon('check') ?> <span id="order-submit-label">Review order</span></button>
-      <p class="hint text-center">You will see the final server-calculated price before anything is charged.</p>
+      <p class="hint text-center">You will see the final server-calculated price before anything is charged. Need help choosing? <a href="<?= e(url('/tickets/new?category=order')) ?>">Ask support</a> or browse the <a href="<?= e(url('/catalog')) ?>">full service list</a>.</p>
     </form>
   </div></div>
 
-  <aside class="sticky-side">
-    <div class="card mb-2"><div class="card-body">
-      <h3>Before you order</h3>
-      <ul class="text-sm" style="padding-left:18px;color:var(--text-2)">
-        <li>Make sure the account or post is <strong>public</strong>.</li>
-        <li>Don't place a second order for the same link until the first completes.</li>
-        <li>Don't change the username or delete the post while delivering.</li>
-        <li>Undelivered quantity of partial orders is refunded automatically.</li>
-      </ul>
-    </div></div>
-    <div class="card"><div class="card-body text-sm">
-      Need help choosing? <a href="<?= e(url('/tickets/new?category=order')) ?>">Ask support</a> or browse the <a href="<?= e(url('/catalog')) ?>">full service list</a>.
-    </div></div>
-  </aside>
 </div>
 
 <dialog class="modal modal-order" id="order-confirm" aria-labelledby="order-confirm-title">

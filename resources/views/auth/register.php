@@ -38,6 +38,7 @@
   </ul>
   <?php if ($ref !== ''): ?><input type="hidden" name="ref" value="<?= e($ref) ?>"><div class="alert alert-info"><?= icon('gift') ?><div>You were invited by a friend (code <strong><?= e($ref) ?></strong>).</div></div><?php endif ?>
   <div class="field"><?= Form::check('terms', 'I agree to the <a href="' . e(url('/terms')) . '" target="_blank" rel="noopener">Terms of Service</a> and <a href="' . e(url('/privacy')) . '" target="_blank" rel="noopener">Privacy Policy</a>.', old('terms') === '1') ?></div>
+  <?= $this->partial('partials/recaptcha', ['captcha' => $captcha ?? null]) ?>
   <button class="btn btn-primary btn-lg btn-block" type="submit" data-loading-text="Creating your account…"><span>Create account</span></button>
 </form>
 <p class="auth-foot">Already have an account? <a href="<?= e(url('/login')) ?>">Sign in</a></p>

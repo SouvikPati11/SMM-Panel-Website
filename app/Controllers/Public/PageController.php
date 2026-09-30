@@ -26,7 +26,7 @@ final class PageController extends Controller
             'categories' => (int) $db->fetchColumn("SELECT COUNT(*) FROM categories WHERE status = 'active'"),
         ];
         $popular = $db->fetchAll(
-            "SELECT s.id, s.name, s.rate, s.type, c.name AS category FROM services s JOIN categories c ON c.id = s.category_id
+            "SELECT s.id, s.name, s.rate, s.type, c.name AS category, c.platform AS category_platform FROM services s JOIN categories c ON c.id = s.category_id
              WHERE s.status = 'active' AND s.is_hidden = 0 AND c.status = 'active' ORDER BY s.sort_order, s.id LIMIT 5"
         );
         $faqs = $db->fetchAll("SELECT * FROM faqs WHERE status = 'active' ORDER BY sort_order, id LIMIT 5");
@@ -35,8 +35,8 @@ final class PageController extends Controller
             : [];
         // Supported platforms = what the live catalog actually offers (no invented claims).
         $platforms = [];
-        foreach ($db->fetchAll("SELECT c.id, c.name, COUNT(s.id) AS n FROM categories c JOIN services s ON s.category_id = c.id AND s.status = 'active' AND s.is_hidden = 0 WHERE c.status = 'active' GROUP BY c.id, c.name ORDER BY c.sort_order, c.name") as $c) {
-            $key = \App\Helpers\Platforms::detect($c['name']);
+        foreach ($db->fetchAll("SELECT c.id, c.name, c.platform, COUNT(s.id) AS n FROM categories c JOIN services s ON s.category_id = c.id AND s.status = 'active' AND s.is_hidden = 0 WHERE c.status = 'active' GROUP BY c.id, c.name, c.platform ORDER BY c.sort_order, c.name") as $c) {
+            $key = \App\Helpers\Platforms::forCategory($c);
             $platforms[$key] ??= ['key' => $key, 'label' => \App\Helpers\Platforms::label($key), 'services' => 0, 'category' => (int) $c['id']];
             $platforms[$key]['services'] += (int) $c['n'];
         }

@@ -20,7 +20,7 @@ $s = fn (string $k) => (string) setting($k); $on = fn (string $k) => setting($k)
 <?php elseif ($tab === 'contact'): ?>
   <div class="form-grid"><?= Form::input('contact_email', 'Contact email (receives contact form)', $s('contact_email'), ['type' => 'email']) ?><?= Form::input('contact_telegram', 'Telegram', $s('contact_telegram')) ?>
   <?= Form::input('contact_whatsapp', 'WhatsApp', $s('contact_whatsapp')) ?><?= Form::input('contact_address', 'Address', $s('contact_address')) ?>
-  <?php foreach (['social_facebook' => 'Facebook URL', 'social_instagram' => 'Instagram URL', 'social_x' => 'X / Twitter URL', 'social_youtube' => 'YouTube URL', 'social_telegram' => 'Telegram channel URL'] as $k => $l): ?><?= Form::input($k, $l, $s($k), ['type' => 'url']) ?><?php endforeach ?></div>
+  <?php foreach (['social_facebook' => 'Facebook URL', 'social_instagram' => 'Instagram URL', 'social_x' => 'X (Twitter) URL', 'social_youtube' => 'YouTube URL', 'social_telegram' => 'Telegram channel URL', 'social_tiktok' => 'TikTok URL'] as $k => $l): ?><?= Form::input($k, $l, $s($k), ['type' => 'url']) ?><?php endforeach ?></div>
 <?php elseif ($tab === 'currency'): ?>
   <div class="alert alert-warning"><?= icon('alert') ?><div>The currency applies to all balances and prices. Change it only before you have customer balances — existing amounts are not converted.</div></div>
   <div class="form-grid"><?= Form::input('currency_code', 'Currency code (ISO)', $s('currency_code'), ['required' => true, 'maxlength' => 3, 'hint' => 'Sent to gateways, e.g. USD, EUR, INR.']) ?><?= Form::input('currency_symbol', 'Symbol', $s('currency_symbol'), ['required' => true]) ?>
@@ -44,6 +44,20 @@ $s = fn (string $k) => (string) setting($k); $on = fn (string $k) => setting($k)
     </div>
     <div class="field"><div class="label">Authorized redirect URI (add this exactly in Google Cloud Console)</div><div class="copy-box"><span class="break-words"><?= e($g['redirect_uri']) ?></span><button class="btn btn-ghost btn-sm" type="button" data-copy="<?= e($g['redirect_uri']) ?>" aria-label="Copy redirect URI"><?= icon('copy') ?></button></div></div>
     <p class="hint">Google Cloud Console → APIs &amp; Services → Credentials → Create OAuth client ID (Web application). Full steps: <code>docs/google-login.md</code>.</p>
+  </div>
+  <h3 class="mt-3" id="recaptcha">Google reCAPTCHA</h3>
+  <?php $rc = \App\Services\RecaptchaService::config(); ?>
+  <?= Form::toggle('recaptcha_enabled', 'Require reCAPTCHA on the Login and Sign up forms', $on('recaptcha_enabled'), 'ON: the check is shown on both forms and verified on the server before signing in or creating an account. OFF: nothing is shown or checked. Sign in with Google is not affected.') ?>
+  <div class="setting-sub" data-show-if="recaptcha_enabled">
+    <?php if ($rc['source'] === 'env'): ?><div class="alert alert-info"><?= icon('info') ?><div>Using <code>RECAPTCHA_SITE_KEY</code> / <code>RECAPTCHA_SECRET_KEY</code> from <code>.env</code>; the key fields below are ignored.</div></div><?php endif ?>
+    <div class="form-grid">
+      <?= Form::select('recaptcha_version', 'Type', \App\Services\RecaptchaService::VERSIONS, $s('recaptcha_version') ?: 'v2', ['hint' => 'Must match the key type you created in the reCAPTCHA admin console.']) ?>
+      <?= Form::input('recaptcha_min_score', 'Minimum score (v3 only)', $s('recaptcha_min_score') ?: '0.5', ['type' => 'number', 'step' => '0.1', 'min' => '0.1', 'max' => '0.9', 'hint' => '0.1 (lenient) – 0.9 (strict). Google recommends 0.5.']) ?>
+      <?= Form::input('recaptcha_site_key', 'Site key', $s('recaptcha_site_key'), ['autocomplete' => 'off', 'placeholder' => '6L…']) ?>
+      <?= Form::input('recaptcha_secret_key', 'Secret key', '', ['type' => 'password', 'autocomplete' => 'new-password', 'placeholder' => (string) setting('recaptcha_secret_key') !== '' ? '•••••••• (saved — leave empty to keep)' : '6L…', 'hint' => 'Stored encrypted with your APP_KEY; never shown again or sent to browsers.']) ?>
+    </div>
+    <?php if ((string) setting('recaptcha_secret_key') !== ''): ?><?= Form::check('recaptcha_secret_key_clear', 'Remove the saved secret key', false) ?><?php endif ?>
+    <p class="hint">Create keys at <a href="https://www.google.com/recaptcha/admin" target="_blank" rel="noopener">google.com/recaptcha/admin</a> and add your domain (<code><?= e(parse_url(url('/'), PHP_URL_HOST) ?: '') ?></code>). Full steps: <code>docs/recaptcha.md</code>.</p>
   </div>
   <div class="form-grid"><?= Form::input('login_max_attempts', 'Failed logins before lockout', $s('login_max_attempts'), ['type' => 'number']) ?><?= Form::input('login_lockout_minutes', 'Lockout minutes', $s('login_lockout_minutes'), ['type' => 'number']) ?></div>
   <?= Form::select('default_price_level', 'Default price level for new users', $levels, $s('default_price_level'), ['empty' => 'None']) ?>

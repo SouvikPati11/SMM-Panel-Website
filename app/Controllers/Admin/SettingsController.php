@@ -26,7 +26,7 @@ final class SettingsController extends Controller
         ],
         'contact' => [
             'contact_email' => 'email', 'contact_telegram' => 'max:100', 'contact_whatsapp' => 'max:50', 'contact_address' => 'max:300',
-            'social_facebook' => 'url', 'social_instagram' => 'url', 'social_x' => 'url', 'social_youtube' => 'url', 'social_telegram' => 'url',
+            'social_facebook' => 'url', 'social_instagram' => 'url', 'social_x' => 'url', 'social_youtube' => 'url', 'social_telegram' => 'url', 'social_tiktok' => 'url',
         ],
         'currency' => [
             'currency_code' => 'required|regex:/^[A-Z]{3}$/', 'currency_symbol' => 'required|max:5', 'currency_position' => 'required|in:before,after', 'currency_decimals' => 'required|in:0,2,3,4',
@@ -35,6 +35,8 @@ final class SettingsController extends Controller
         'users' => [
             'registration_enabled' => 'boolean', 'email_verification' => 'boolean', 'registration_mobile' => 'boolean', 'registration_mobile_optional' => 'boolean',
             'google_login_enabled' => 'boolean', 'google_client_id' => 'max:200|regex:/^[A-Za-z0-9._\-]*$/',
+            'recaptcha_enabled' => 'boolean', 'recaptcha_version' => 'in:v2,v3', 'recaptcha_site_key' => 'max:100|regex:/^[A-Za-z0-9_\-]*$/',
+            'recaptcha_min_score' => 'decimal|min:0.1|max:0.9',
             'login_max_attempts' => 'required|integer|min:3|max:50',
             'login_lockout_minutes' => 'required|integer|min:1|max:1440', 'default_price_level' => 'integer',
         ],
@@ -112,6 +114,24 @@ final class SettingsController extends Controller
                 $input['google_client_secret'] = $secret; // encrypted at rest (SettingsService::SECRET_KEYS)
             } elseif ($request->bool('google_client_secret_clear')) {
                 $input['google_client_secret'] = '';
+            }
+            // Fields absent from an older form keep their saved values.
+            $input['recaptcha_version'] = $input['recaptcha_version'] ?: (string) setting('recaptcha_version', 'v2');
+            $input['recaptcha_min_score'] = $input['recaptcha_min_score'] ?: (string) setting('recaptcha_min_score', '0.5');
+            $rcSecret = trim((string) ($request->post()['recaptcha_secret_key'] ?? ''));
+            if ($rcSecret !== '') {
+                if (strlen($rcSecret) > 100 || !preg_match('/^[A-Za-z0-9_\-]+$/', $rcSecret)) {
+                    throw new ValidationException('The reCAPTCHA secret key looks invalid.');
+                }
+                $input['recaptcha_secret_key'] = $rcSecret; // encrypted at rest (SettingsService::SECRET_KEYS)
+            } elseif ($request->bool('recaptcha_secret_key_clear')) {
+                $input['recaptcha_secret_key'] = '';
+            }
+            if ($input['recaptcha_enabled'] === '1') {
+                SettingsService::setMany(array_intersect_key($input, ['recaptcha_site_key' => 1, 'recaptcha_secret_key' => 1, 'recaptcha_version' => 1]));
+                if (!\App\Services\RecaptchaService::configured()) {
+                    throw new ValidationException('To enable reCAPTCHA, enter the site key and secret key (or set RECAPTCHA_SITE_KEY / RECAPTCHA_SECRET_KEY in .env).');
+                }
             }
             if ($input['google_login_enabled'] === '1') {
                 SettingsService::setMany(array_intersect_key($input, ['google_client_id' => 1, 'google_client_secret' => 1]));

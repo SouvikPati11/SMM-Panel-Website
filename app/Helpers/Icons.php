@@ -84,6 +84,7 @@ final class Icons
         'pinterest' => '<circle cx="12" cy="12" r="9"/><path d="M10.5 20.5 12 14m-.5-2.5c0-2 1-3 2.5-3s2.3 1 2.3 2.4c0 2.2-1.4 4.1-3.3 4.1-.9 0-1.5-.5-1.5-1.3"/>',
         'soundcloud' => '<path d="M3 15v2M6 13v4M9 11v6M12 9v8h6a3 3 0 0 0 0-6 5 5 0 0 0-6-2"/>',
         'reddit' => '<circle cx="12" cy="14" r="6.5"/><path d="M12 7.5 13.2 3l3.3.8"/><circle cx="18" cy="4.5" r="1.2"/><circle cx="9.5" cy="13.5" r=".8"/><circle cx="14.5" cy="13.5" r=".8"/><path d="M9.5 16.5c1.5 1 3.5 1 5 0"/>',
+        'vk' => '<rect x="2.5" y="2.5" width="19" height="19" rx="5"/><path d="m6.5 9 2.2 6L11 9M13.5 9v6M13.5 12.2 17 9M14.6 11.3 17.3 15"/>',
         'kick' => '<path d="M5 4h4v5l3-3h3v3l-3 3 3 3v3h-3l-3-3v5H5V4Z"/>',
     ];
 

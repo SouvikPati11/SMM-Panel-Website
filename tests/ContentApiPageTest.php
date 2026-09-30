@@ -124,3 +124,33 @@ T::test('Admin balance controls: header buttons, dialog and list shortcuts only 
     T::true(!str_contains($page, 'balance-dialog') && !str_contains($page, 'Add balance'), 'hidden without users.balance');
     unset($_SESSION['admin_id'], $_SESSION['admin_sv']);
 });
+
+T::test('Public API docs: every method documented, code blocks in their own scroll containers with copy buttons', function () {
+    App\Services\Auth::logoutUser();
+    $html = http('GET', '/api-docs')->body();
+    foreach (['services', 'add', 'status', 'refill', 'refill_status', 'cancel', 'balance'] as $action) {
+        T::true(str_contains($html, '<code class="api-action">action=' . $action . '</code>'), $action);
+    }
+    T::true(str_contains($html, 'class="api-nav"') && str_contains($html, 'href="#errors"'));
+    // Each response/example is a scrollable <pre> inside a .code-block with a copy button carrying the same text.
+    T::eq(substr_count($html, '<div class="code-block">'), substr_count($html, 'class="btn btn-ghost btn-sm code-copy"'));
+    T::true(substr_count($html, '<div class="code-block">') >= 11);
+    T::true(str_contains($html, 'data-copy="curl -X POST ' . url('/api/v2')));
+    T::true(!str_contains($html, '<table'), 'parameters are stacked lists, not wide tables');
+    T::true(!str_contains($html, 'YOUR_API_KEY\'') || str_contains($html, '&apos;YOUR_API_KEY&apos;'), 'examples escaped');
+});
+
+T::test('Footer social icons: only configured networks, icon links with labels, new tab + noopener; bad URLs never rendered', function () {
+    App\Services\SettingsService::setMany(['social_facebook' => 'https://facebook.com/panel', 'social_instagram' => '', 'social_x' => 'https://x.com/panel', 'social_youtube' => '', 'social_telegram' => 'javascript:alert(1)', 'social_tiktok' => 'https://www.tiktok.com/@panel']);
+    $html = http('GET', '/')->body();
+    preg_match('#<ul class="footer-social"[^>]*>(.*?)</ul>#s', $html, $m);
+    $f = $m[1] ?? '';
+    T::eq(3, substr_count($f, 'class="social-link"'));
+    T::true(str_contains($f, 'href="https://facebook.com/panel"') && str_contains($f, 'href="https://x.com/panel"') && str_contains($f, 'href="https://www.tiktok.com/@panel"'));
+    T::true(str_contains($f, 'aria-label="' . e(site_name()) . ' on TikTok (opens in a new tab)"'));
+    T::true(str_contains($f, '<svg') && !str_contains($f, '>Facebook<'), 'icons, not names');
+    T::eq(3, substr_count($f, 'target="_blank" rel="noopener noreferrer"'));
+    T::true(!str_contains($html, 'javascript:alert'), 'non-http URL never rendered');
+    App\Services\SettingsService::setMany(['social_facebook' => '', 'social_x' => '', 'social_telegram' => '', 'social_tiktok' => '']);
+    T::true(!str_contains(http('GET', '/')->body(), 'class="footer-social"'), 'no empty list');
+});

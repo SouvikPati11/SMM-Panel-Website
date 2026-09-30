@@ -51,7 +51,10 @@ final class OrderController extends Controller
         }
         $withServices = array_flip(array_column($services, 'c'));
         $categories = array_values(array_filter($categories, static fn ($c) => isset($withServices[(int) $c['id']])));
-        return [array_map(static fn ($c) => ['id' => (int) $c['id'], 'n' => $c['name'], 'p' => Platforms::detect($c['name'])], $categories), $services];
+        return [array_map(static function ($c) {
+            $p = Platforms::forCategory($c);
+            return ['id' => (int) $c['id'], 'n' => $c['name'], 'p' => $p, 'g' => Platforms::group($p)];
+        }, $categories), $services];
     }
 
     public function create(Request $request): Response
@@ -274,8 +277,10 @@ final class OrderController extends Controller
         }
         $grouped = [];
         $catNames = array_column($categories, 'n', 'id');
+        $catPlatforms = array_column($categories, 'p', 'id');
         foreach ($services as $s) {
             $grouped[$s['c']]['name'] = $catNames[$s['c']] ?? '';
+            $grouped[$s['c']]['platform'] = $catPlatforms[$s['c']] ?? 'other';
             $grouped[$s['c']]['services'][] = $s;
         }
         return $this->view('user/catalog', ['title' => 'Services', 'grouped' => $grouped, 'categories' => $categories, 'q' => $q, 'cat' => $cat, 'discount' => OrderService::userDiscount($user)]);
